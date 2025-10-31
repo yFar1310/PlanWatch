@@ -22,3 +22,11 @@ coverage/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+node_modules
+dist
+.vscode
+.DS_Store
+.env*
+*.local
+pnpm-lock.yaml

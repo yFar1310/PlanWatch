@@ -1,0 +1,8 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "environmentVariables": {
+    "VITE_API_URL": "https://planwatch-cloud.workers.dev"
+  }
+}
