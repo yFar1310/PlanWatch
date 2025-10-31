@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Composants utilitaires que tes vues utilisent */
+@layer components {
+  .card { @apply rounded-2xl border border-gray-200/70 dark:border-gray-800 bg-white dark:bg-gray-950 shadow-card; }
+  .card-body { @apply p-5; }
+}
+
+/* Conteneur custom utilisé dans AppShell/NavBar */
+@layer utilities {
+  .container-xx { @apply mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8; }
+}

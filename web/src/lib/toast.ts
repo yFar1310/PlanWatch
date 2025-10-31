@@ -1,0 +1,1 @@
+export const toast = (msg:string) => alert(msg);
