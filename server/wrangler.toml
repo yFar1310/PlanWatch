@@ -2,13 +2,9 @@ name = "planwatch-api"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
 account_id = "102bce0390a881f95282d1fa20a29c84"
-compatibility_flags = ["nodejs_compat"]
+
 
 [vars]
 CORS_ORIGIN = "https://planwatch.pages.dev, http://localhost:5173"
 
 
-[env.production]
-routes = [
-  { pattern = "api.planwatch.xyz/*", zone_id = "${ZONE_ID}" }
-]
