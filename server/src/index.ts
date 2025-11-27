@@ -72,7 +72,7 @@ async function ensureSchema() {
     ALTER TABLE plans
       ADD COLUMN IF NOT EXISTS depends_on INT[] NOT NULL DEFAULT ARRAY[]::INT[];
 
-    -- Colonne status (pour filtrage éventuel : active / archived, etc.)
+    -- Colonne status
     ALTER TABLE plans
       ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
 
@@ -85,37 +85,52 @@ async function ensureSchema() {
   // Seed de base si la table est vide (3 tâches)
   const seedSql = `
     INSERT INTO plans (title, expected_minutes, actual_minutes, due_at, note, depends_on, status)
-    SELECT title, expected_minutes, actual_minutes, due_at, note, depends_on, status
+    SELECT
+      title,
+      expected_minutes,
+      actual_minutes,
+      due_at,
+      note,
+      depends_on,
+      status
     FROM (
       VALUES
         (
           'Prepare NoSQL report',
-          120,
-          NULL,
-          now() + interval '1 day',
-          'Outline sections and main ideas.',
+          120::INT,
+          NULL::INT,
+          (now() + interval '1 day')::TIMESTAMPTZ,
+          'Outline sections and main ideas.'::TEXT,
           ARRAY[]::INT[],
-          'active'
+          'active'::TEXT
         ),
         (
           'Implement PlanWatch PERT',
-          90,
-          NULL,
-          now() + interval '2 days',
-          'Refine PERT algorithm and UI.',
+          90::INT,
+          NULL::INT,
+          (now() + interval '2 days')::TIMESTAMPTZ,
+          'Refine PERT algorithm and UI.'::TEXT,
           ARRAY[]::INT[],
-          'active'
+          'active'::TEXT
         ),
         (
           'Refactor dashboard UI',
-          60,
-          NULL,
-          now() + interval '3 days',
-          'Polish cards, colors and animations.',
+          60::INT,
+          NULL::INT,
+          (now() + interval '3 days')::TIMESTAMPTZ,
+          'Polish cards, colors and animations.'::TEXT,
           ARRAY[]::INT[],
-          'active'
+          'active'::TEXT
         )
-    ) AS seed(title, expected_minutes, actual_minutes, due_at, note, depends_on, status)
+    ) AS seed(
+      title,
+      expected_minutes,
+      actual_minutes,
+      due_at,
+      note,
+      depends_on,
+      status
+    )
     WHERE NOT EXISTS (SELECT 1 FROM plans);
   `;
   await pool.query(seedSql);
