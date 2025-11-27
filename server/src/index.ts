@@ -24,7 +24,9 @@ const ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
 
 const app = new Hono();
 
-// ---------------------------- CORS & security ------------------------------
+// ---------------------------------------------------------------------------
+// CORS
+// ---------------------------------------------------------------------------
 app.use(
   '*',
   cors({
@@ -35,7 +37,9 @@ app.use(
   })
 );
 
-// ------------------------------- Routes -----------------------------------
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 app.get('/health', healthHandler);
 app.post('/api/submit', submitHandler);
 
@@ -48,9 +52,12 @@ app.get('/api/stats', statsHandler);
 app.get('/api/activity', activityHandler);
 app.get('/api/pert', pertHandler);
 
-// -------------------------- DB schema (Postgres) ---------------------------
+// ---------------------------------------------------------------------------
+// Schema + seed (Postgres)
+// ---------------------------------------------------------------------------
 async function ensureSchema() {
   const sql = `
+    -- Table principale
     CREATE TABLE IF NOT EXISTS plans (
       id SERIAL PRIMARY KEY,
       title TEXT NOT NULL,
@@ -60,17 +67,63 @@ async function ensureSchema() {
       note TEXT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- Colonne deps pour PERT (liste d'ids de tâches)
     ALTER TABLE plans
       ADD COLUMN IF NOT EXISTS depends_on INT[] NOT NULL DEFAULT ARRAY[]::INT[];
 
-    -- index utiles
+    -- Colonne status (pour filtrage éventuel : active / archived, etc.)
+    ALTER TABLE plans
+      ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+
+    -- Index utiles
     CREATE INDEX IF NOT EXISTS idx_plans_due_at ON plans (due_at);
     CREATE INDEX IF NOT EXISTS idx_plans_created_at ON plans (created_at);
   `;
   await pool.query(sql);
+
+  // Seed de base si la table est vide (3 tâches)
+  const seedSql = `
+    INSERT INTO plans (title, expected_minutes, actual_minutes, due_at, note, depends_on, status)
+    SELECT title, expected_minutes, actual_minutes, due_at, note, depends_on, status
+    FROM (
+      VALUES
+        (
+          'Prepare NoSQL report',
+          120,
+          NULL,
+          now() + interval '1 day',
+          'Outline sections and main ideas.',
+          ARRAY[]::INT[],
+          'active'
+        ),
+        (
+          'Implement PlanWatch PERT',
+          90,
+          NULL,
+          now() + interval '2 days',
+          'Refine PERT algorithm and UI.',
+          ARRAY[]::INT[],
+          'active'
+        ),
+        (
+          'Refactor dashboard UI',
+          60,
+          NULL,
+          now() + interval '3 days',
+          'Polish cards, colors and animations.',
+          ARRAY[]::INT[],
+          'active'
+        )
+    ) AS seed(title, expected_minutes, actual_minutes, due_at, note, depends_on, status)
+    WHERE NOT EXISTS (SELECT 1 FROM plans);
+  `;
+  await pool.query(seedSql);
 }
 
-// --------------------------- App bootstrap ---------------------------------
+// ---------------------------------------------------------------------------
+// Bootstrap
+// ---------------------------------------------------------------------------
 async function start() {
   console.log('Boot config', {
     HOST,
@@ -85,7 +138,7 @@ async function start() {
     await pool.query('SELECT 1');
     console.log('[PG] Connection OK');
     await ensureSchema();
-    console.log('[PG] Schema OK');
+    console.log('[PG] Schema OK (with seed)');
   } catch (e) {
     console.error('[PG] Connection or schema FAILED:', e);
   }
@@ -103,11 +156,12 @@ async function start() {
 }
 
 start().catch((e) => {
-  // dernier filet de sécurité (au cas où)
   console.error('Fatal error during startup', e);
 });
 
-// --------------------------- Graceful shutdown -----------------------------
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+// ---------------------------------------------------------------------------
 async function shutdown() {
   console.log('Shutting down…');
   try {
