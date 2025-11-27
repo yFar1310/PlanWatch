@@ -31,7 +31,8 @@ export default async function listPlansHandler(c: Context) {
       due_at             AS "dueAt",
       note,
       depends_on         AS "dependsOn",
-      created_at         AS "createdAt"
+      created_at         AS "createdAt",
+      status
     FROM plans
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY ${qp.order} ${qp.dir}

@@ -1,4 +1,4 @@
-import type { Plan } from '../types'
+import type { Plan, DashboardStats, ActivityEvent } from '../types'
 
 
 const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000') as string
@@ -35,6 +35,16 @@ updatePlan(id: number, patch: Partial<Plan>) {
 },
 deletePlan(id: number) {
   return fetch(`${BASE}/api/plans/${id}`, { method: 'DELETE' }).then(json)
+},
+getStats() {
+  return fetch(`${BASE}/api/stats`).then(json) as Promise<DashboardStats>
+},
+listActivity(limit = 8) {
+  const qs = `?limit=${limit}`
+  return fetch(`${BASE}/api/activity${qs}`).then(json) as Promise<{ items: ActivityEvent[] }>
+},
+pert() {
+  return fetch(`${BASE}/api/pert`).then(json)
 },
 }
 }

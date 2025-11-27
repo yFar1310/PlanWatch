@@ -1,30 +1,551 @@
 <script setup lang="ts">
-import { Timer, Calendar } from 'lucide-vue-next'
+import { Timer, Calendar, Activity as ActivityIcon } from 'lucide-vue-next'
+import { onMounted, ref, computed } from 'vue'
+import { useApi } from '../lib/useApi'
+import type { DashboardStats, ActivityEvent, Plan } from '../types'
+import PERTGraph  from '../components/PERT/PERTGraph.vue'; 
+import Card from '../components/ui/Card.vue';
+const api = useApi()
+
+type PertTask = {
+  id: number
+  title: string
+  duration: number
+  dependsOn: number | null
+  es: number
+  ef: number
+  ls: number
+  lf: number
+  slack: number
+}
+
+const pertLoading = ref(true)
+const pertError = ref<string | null>(null)
+const pertTasks = ref<PertTask[]>([])
+const pertProjectDuration = ref(0)
+
+// --- Stats (Postgres) ---
+const stats = ref<DashboardStats | null>(null)
+const statsLoading = ref(true)
+const statsError = ref<string | null>(null)
+
+// --- Activity (Mongo) ---
+const events = ref<ActivityEvent[]>([])
+const eventsLoading = ref(true)
+const eventsError = ref<string | null>(null)
+
+// --- Plans for board (Postgres) ---
+const plans = ref<Plan[]>([])
+const plansLoading = ref(true)
+const plansError = ref<string | null>(null)
+
+// filter like Notion tabs
+type TaskFilter = 'all' | 'today' | 'week' | 'year'
+const taskFilter = ref<TaskFilter>('all')
+
+const taskFilterOptions: { value: TaskFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'today', label: 'Today' },
+  { value: 'week', label: 'This week' },
+  { value: 'year', label: 'This year' },
+]
+
+// --- helpers dates ---
+function startOfDay(d: Date) {
+  const x = new Date(d)
+  x.setHours(0, 0, 0, 0)
+  return x
+}
+function endOfDay(d: Date) {
+  const x = new Date(d)
+  x.setHours(23, 59, 59, 999)
+  return x
+}
+function startOfWeek(d: Date) {
+  const x = startOfDay(d)
+  const day = x.getDay() || 7 // Monday=1..Sunday=7
+  const diff = day - 1
+  x.setDate(x.getDate() - diff)
+  return x
+}
+function endOfWeek(d: Date) {
+  const s = startOfWeek(d)
+  s.setDate(s.getDate() + 6)
+  s.setHours(23, 59, 59, 999)
+  return s
+}
+
+// --- initial load ---
+onMounted(async () => {
+  // Stats (Postgres)
+  try {
+    const s = await api.getStats()
+    stats.value = s
+  } catch (e: any) {
+    statsError.value = e?.message ?? String(e)
+  } finally {
+    statsLoading.value = false
+  }
+
+  // Activity (Mongo)
+  try {
+    const r = await api.listActivity(8)
+    events.value = Array.isArray(r.items) ? r.items : (r as any)
+  } catch (e: any) {
+    eventsError.value = e?.message ?? String(e)
+  } finally {
+    eventsLoading.value = false
+  }
+
+  // Plans (Postgres) for board
+  try {
+    const r = await api.listPlans({ order: 'due_at', dir: 'asc', limit: 200 })
+    plans.value = Array.isArray(r.items) ? r.items : r
+  } catch (e: any) {
+    plansError.value = e?.message ?? String(e)
+  } finally {
+    plansLoading.value = false
+  }
+
+  // PERT
+  try {
+    const p = await api.pert()
+    pertTasks.value = p.tasks
+    pertProjectDuration.value = p.projectDuration
+  } catch (e: any) {
+    pertError.value = e?.message ?? String(e)
+  } finally {
+    pertLoading.value = false
+  }
+})
+
+// --- derived stats ---
+const todayDelta = computed(() => {
+  if (!stats.value) return 0
+  return (stats.value.todayActualMinutes ?? 0) - (stats.value.todayExpectedMinutes ?? 0)
+})
+
+const eventTypeLabel: Record<string, string> = {
+  plan_submitted: 'Created',
+  plan_updated: 'Updated',
+  plan_deleted: 'Deleted',
+}
+
+// --- tasks board logic ---
+
+// Filter by Today / Week / Year
+const filteredPlans = computed(() => {
+  const now = new Date()
+  const todayStart = startOfDay(now)
+  const todayEnd = endOfDay(now)
+  const weekStart = startOfWeek(now)
+  const weekEnd = endOfWeek(now)
+  const yearStart = new Date(now.getFullYear(), 0, 1)
+  const yearEnd = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999)
+
+  return plans.value.filter((p) => {
+    const due = new Date(p.dueAt)
+    switch (taskFilter.value) {
+      case 'today':
+        return due >= todayStart && due <= todayEnd
+      case 'week':
+        return due >= weekStart && due <= weekEnd
+      case 'year':
+        return due >= yearStart && due <= yearEnd
+      default:
+        return true
+    }
+  })
+})
+
+// Board columns: Not started / In progress / Done
+const boardByStatus = computed(() => {
+  const res = {
+    notStarted: [] as Plan[],
+    inProgress: [] as Plan[],
+    done: [] as Plan[],
+  }
+  const now = new Date()
+  const todayStart = startOfDay(now)
+  const todayEnd = endOfDay(now)
+
+  for (const p of filteredPlans.value) {
+    const due = new Date(p.dueAt)
+    const isDone = p.actualMinutes != null && p.actualMinutes > 0
+
+    if (isDone) {
+      res.done.push(p)
+    } else if (due >= todayStart && due <= todayEnd) {
+      // we "promote" today's tasks as in progress
+      res.inProgress.push(p)
+    } else {
+      res.notStarted.push(p)
+    }
+  }
+
+  return res
+})
+
+// Badges style: Do it today / remaining / overdue / done
+function statusBadge(p: Plan) {
+  const now = new Date()
+  const todayStart = startOfDay(now)
+  const due = new Date(p.dueAt)
+  const isDone = p.actualMinutes != null && p.actualMinutes > 0
+
+  if (isDone) return { label: 'Done', variant: 'done' as const }
+
+  if (due < todayStart) {
+    return { label: 'Overdue', variant: 'danger' as const }
+  }
+
+  const diffDays = Math.round(
+    (startOfDay(due).getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24)
+  )
+  if (diffDays === 0) return { label: 'Do it today!', variant: 'today' as const }
+  if (diffDays === 1) return { label: '1 day remaining', variant: 'soon' as const }
+
+  return { label: `${diffDays} days remaining`, variant: 'soon' as const }
+}
+
+function badgeClass(variant: 'danger' | 'today' | 'soon' | 'done') {
+  const base = 'inline-flex items-center rounded-full px-2 py-0.5 text-[11px]'
+  switch (variant) {
+    case 'danger':
+      return `${base} bg-rose-500/10 text-rose-300`
+    case 'today':
+      return `${base} bg-amber-500/10 text-amber-300`
+    case 'soon':
+      return `${base} bg-sky-500/10 text-sky-300`
+    case 'done':
+      return `${base} bg-emerald-500/10 text-emerald-300`
+  }
+}
+
+function formatDateShort(iso: string) {
+  const d = new Date(iso)
+  return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
+}
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div class="space-y-8">
+    <!-- Top stats row -->
     <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <!-- Today -->
       <section class="card">
         <div class="card-body">
           <div class="flex items-center gap-3">
             <Timer class="h-5 w-5 text-brand" />
             <h2 class="font-semibold">Today</h2>
           </div>
-          <p class="mt-4 text-sm text-gray-600 dark:text-gray-400">Quick overview of your planned vs actual minutes.</p>
+
+          <div class="mt-4 text-sm">
+            <div v-if="statsLoading" class="space-y-2">
+              <div class="h-4 w-40 rounded bg-gray-200/60 dark:bg-gray-800 animate-pulse" />
+              <div class="h-4 w-32 rounded bg-gray-200/60 dark:bg-gray-800 animate-pulse" />
+              <div class="h-4 w-24 rounded bg-gray-200/60 dark:bg-gray-800 animate-pulse" />
+            </div>
+
+            <p v-else-if="statsError" class="text-sm text-red-500">
+              {{ statsError }}
+            </p>
+
+            <div v-else-if="stats">
+              <p class="text-gray-400 dark:text-gray-400">
+                {{ stats.todayCount }} plan<span v-if="stats.todayCount !== 1">s</span> due today.
+              </p>
+              <p class="mt-2">
+                Planned:
+                <span class="font-semibold">
+                  {{ stats.todayExpectedMinutes }} min
+                </span>
+              </p>
+              <p class="mt-1">
+                Actual:
+                <span class="font-semibold">
+                  {{ stats.todayActualMinutes ?? 0 }} min
+                </span>
+              </p>
+              <p v-if="todayDelta !== 0" class="mt-1 text-xs">
+                Delta:
+                <span :class="todayDelta > 0 ? 'text-emerald-400' : 'text-amber-400'">
+                  {{ todayDelta > 0 ? '+' : '' }}{{ todayDelta }} min
+                </span>
+              </p>
+            </div>
+
+            <p v-else class="text-sm text-gray-500">No data yet.</p>
+          </div>
         </div>
       </section>
 
+      <!-- Upcoming -->
       <section class="card">
         <div class="card-body">
           <div class="flex items-center gap-3">
             <Calendar class="h-5 w-5 text-brand" />
             <h2 class="font-semibold">Upcoming</h2>
           </div>
-          <p class="mt-4 text-sm text-gray-600 dark:text-gray-400">Due soon plans at a glance.</p>
+
+          <div class="mt-4 text-sm">
+            <div v-if="statsLoading" class="h-4 w-32 rounded bg-gray-200/60 dark:bg-gray-800 animate-pulse" />
+
+            <p v-else-if="statsError" class="text-sm text-red-500">
+              {{ statsError }}
+            </p>
+
+            <p v-else-if="stats">
+              {{ stats.upcomingCount }} plan<span v-if="stats.upcomingCount !== 1">s</span>
+              due in the next 7 days.
+              <br />
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                {{ stats.plansWithDependency }} with dependencies.
+              </span>
+            </p>
+
+            <p v-else class="text-sm text-gray-500">
+              No upcoming plans yet.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Recent activity (Mongo) -->
+      <section class="card sm:col-span-2 lg:col-span-1">
+        <div class="card-body">
+          <div class="flex items-center gap-3">
+            <ActivityIcon class="h-5 w-5 text-brand" />
+            <h2 class="font-semibold">Recent activity</h2>
+          </div>
+
+          <div class="mt-4">
+            <div v-if="eventsLoading" class="space-y-2">
+              <div
+                v-for="i in 4"
+                :key="i"
+                class="h-4 w-3/4 rounded bg-gray-200/60 dark:bg-gray-800 animate-pulse"
+              />
+            </div>
+
+            <p v-else-if="eventsError" class="text-sm text-red-500">
+              {{ eventsError }}
+            </p>
+
+            <p v-else-if="!events.length" class="text-sm text-gray-500">
+              No events yet.
+            </p>
+
+            <ul v-else class="space-y-2 text-sm">
+              <li
+                v-for="e in events"
+                :key="e.id"
+                class="flex items-center justify-between"
+              >
+                <div class="flex items-center gap-2">
+                  <span
+                    class="inline-flex items-center rounded-full px-2 py-0.5 text-xs"
+                    :class="{
+                      'bg-emerald-500/10 text-emerald-300': e.type === 'plan_submitted',
+                      'bg-sky-500/10 text-sky-300': e.type === 'plan_updated',
+                      'bg-rose-500/10 text-rose-300': e.type === 'plan_deleted',
+                    }"
+                  >
+                    {{ eventTypeLabel[e.type] ?? e.type }}
+                  </span>
+                  <span class="text-gray-200 dark:text-gray-100">
+                    Plan #{{ e.planId ?? '?' }}
+                  </span>
+                </div>
+                <span class="text-xs text-gray-400">
+                  {{ new Date(e.at).toLocaleString() }}
+                </span>
+              </li>
+            </ul>
+          </div>
         </div>
       </section>
     </div>
+
+    <!-- Tasks board, Notion-style -->
+    <section class="space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-gray-200">Tasks</h2>
+        <div class="inline-flex rounded-full bg-gray-900/70 border border-gray-800 p-1 text-xs">
+          <button
+            v-for="opt in taskFilterOptions"
+            :key="opt.value"
+            type="button"
+            class="px-3 py-1 rounded-full transition"
+            :class="opt.value === taskFilter
+              ? 'bg-gray-800 text-white shadow-sm'
+              : 'text-gray-400 hover:text-gray-100'"
+            @click="taskFilter = opt.value"
+          >
+            {{ opt.label }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="plansLoading" class="grid md:grid-cols-3 gap-4">
+        <div
+          v-for="i in 3"
+          :key="i"
+          class="rounded-2xl border border-gray-800/80 bg-gray-900/40 p-4 space-y-3"
+        >
+          <div class="h-4 w-24 rounded bg-gray-800 animate-pulse" />
+          <div class="space-y-2">
+            <div class="h-10 rounded-xl bg-gray-800 animate-pulse" />
+            <div class="h-10 rounded-xl bg-gray-800 animate-pulse" />
+          </div>
+        </div>
+      </div>
+
+      <p v-else-if="plansError" class="text-sm text-red-500">
+        {{ plansError }}
+      </p>
+
+      <div
+        v-else
+        class="grid md:grid-cols-3 gap-4"
+      >
+        <!-- Not started -->
+        <div class="rounded-2xl border border-gray-800/80 bg-gray-950/40 flex flex-col">
+          <div class="px-4 py-3 flex items-center justify-between">
+            <span class="text-xs font-semibold uppercase tracking-wide text-gray-400">
+              Not started
+            </span>
+            <span class="text-xs text-gray-500">
+              {{ boardByStatus.notStarted.length }}
+            </span>
+          </div>
+          <div class="px-4 pb-4 space-y-2 flex-1">
+            <div
+              v-for="p in boardByStatus.notStarted"
+              :key="p.id"
+              class="rounded-xl border border-gray-800 bg-gray-900/60 px-3 py-2 text-xs space-y-1"
+            >
+              <div class="font-medium text-gray-100 truncate">
+                {{ p.title }}
+              </div>
+              <div class="flex items-center justify-between text-[11px] text-gray-400">
+                <span>{{ formatDateShort(p.dueAt) }}</span>
+                <span
+                  v-tooltip="statusBadge(p).label"
+                  :class="badgeClass(statusBadge(p).variant)"
+                >
+                  {{ statusBadge(p).label }}
+                </span>
+              </div>
+            </div>
+            <p
+              v-if="!boardByStatus.notStarted.length"
+              class="text-xs text-gray-500"
+            >
+              No tasks in this column.
+            </p>
+          </div>
+        </div>
+
+        <!-- In progress -->
+        <div class="rounded-2xl border border-gray-800/80 bg-gray-950/40 flex flex-col">
+          <div class="px-4 py-3 flex items-center justify-between">
+            <span class="text-xs font-semibold uppercase tracking-wide text-gray-400">
+              In progress
+            </span>
+            <span class="text-xs text-gray-500">
+              {{ boardByStatus.inProgress.length }}
+            </span>
+          </div>
+          <div class="px-4 pb-4 space-y-2 flex-1">
+            <div
+              v-for="p in boardByStatus.inProgress"
+              :key="p.id"
+              class="rounded-xl border border-gray-800 bg-gray-900/60 px-3 py-2 text-xs space-y-1"
+            >
+              <div class="font-medium text-gray-100 truncate">
+                {{ p.title }}
+              </div>
+              <div class="flex items-center justify-between text-[11px] text-gray-400">
+                <span>{{ formatDateShort(p.dueAt) }}</span>
+                <span :class="badgeClass(statusBadge(p).variant)">
+                  {{ statusBadge(p).label }}
+                </span>
+              </div>
+            </div>
+            <p
+              v-if="!boardByStatus.inProgress.length"
+              class="text-xs text-gray-500"
+            >
+              Nothing in progress.
+            </p>
+          </div>
+        </div>
+
+        <!-- Done -->
+        <div class="rounded-2xl border border-gray-800/80 bg-gray-950/40 flex flex-col">
+          <div class="px-4 py-3 flex items-center justify-between">
+            <span class="text-xs font-semibold uppercase tracking-wide text-gray-400">
+              Done
+            </span>
+            <span class="text-xs text-gray-500">
+              {{ boardByStatus.done.length }}
+            </span>
+          </div>
+          <div class="px-4 pb-4 space-y-2 flex-1">
+            <div
+              v-for="p in boardByStatus.done"
+              :key="p.id"
+              class="rounded-xl border border-gray-800 bg-gray-900/60 px-3 py-2 text-xs space-y-1"
+            >
+              <div class="font-medium text-gray-100 truncate">
+                {{ p.title }}
+              </div>
+              <div class="flex items-center justify-between text-[11px] text-gray-400">
+                <span>{{ formatDateShort(p.dueAt) }}</span>
+                <span :class="badgeClass(statusBadge(p).variant)">
+                  {{ statusBadge(p).label }}
+                </span>
+              </div>
+            </div>
+            <p
+              v-if="!boardByStatus.done.length"
+              class="text-xs text-gray-500"
+            >
+              No completed tasks yet.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="mt-8">
+    <Card>
+      <div class="card-body space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="font-semibold text-sm">PERT timeline</h2>
+          <p v-if="!pertLoading && !pertError" class="text-xs text-slate-400">
+            Project duration:
+            <span class="font-mono">
+              {{ pertProjectDuration }} min
+            </span>
+          </p>
+        </div>
+
+        <div v-if="pertLoading" class="h-40 flex items-center justify-center text-sm text-slate-500">
+          Loading PERT diagram…
+        </div>
+
+        <p v-else-if="pertError" class="text-sm text-red-500">
+          {{ pertError }}
+        </p>
+
+        <PERTGraph
+          v-else
+          :tasks="pertTasks"
+          :project-duration="pertProjectDuration"
+        />
+      </div>
+    </Card>
+  </section>
   </div>
 </template>
-

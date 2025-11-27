@@ -1,3 +1,4 @@
+// server/src/routes/update-plan.ts
 import type { Context } from 'hono'
 import { z, ZodError } from 'zod'
 import { pool } from '../db/pg.js'
@@ -11,10 +12,16 @@ const patchSchema = z.object({
     if (v === undefined) return undefined
     const d = typeof v === 'string' ? new Date(v) : v
     if (Number.isNaN(d.getTime())) throw new Error('Invalid date')
-    return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds())).toISOString()
+    return new Date(
+      Date.UTC(
+        d.getFullYear(), d.getMonth(), d.getDate(),
+        d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()
+      )
+    ).toISOString()
   }).optional(),
   note: z.string().trim().max(500).nullable().optional(),
   dependsOn: z.number().int().positive().nullable().optional(),
+  status: z.enum(['not_started', 'in_progress', 'done']).optional(),
 })
 
 export default async function updatePlanHandler(c: Context) {
@@ -27,9 +34,9 @@ export default async function updatePlanHandler(c: Context) {
     const body = await c.req.json()
     const p = patchSchema.parse(body)
 
-    // 1) On récupère l’état actuel du plan
+    // état actuel
     const currentRes = await pool.query(
-      'SELECT id, due_at, depends_on FROM plans WHERE id = $1',
+      'SELECT id, due_at, depends_on, status FROM plans WHERE id = $1',
       [id]
     )
     if (!currentRes.rows.length) {
@@ -37,14 +44,13 @@ export default async function updatePlanHandler(c: Context) {
     }
     const current = currentRes.rows[0]
 
-    // 2) On calcule les valeurs "effectives" après patch
+    // valeurs effectives après patch
     const effectiveDueAtIso: string = p.dueAt ?? current.due_at
     const effectiveDependsOn: number | null =
       p.dependsOn !== undefined ? p.dependsOn : current.depends_on
 
-    // 3) Règle de cohérence sur la dépendance
+    // règle dépendance
     if (effectiveDependsOn != null) {
-      // interdit de dépendre de soi-même
       if (effectiveDependsOn === id) {
         return c.json(
           { ok: false, error: 'self_dependency', message: 'A plan cannot depend on itself.' },
@@ -58,11 +64,7 @@ export default async function updatePlanHandler(c: Context) {
       )
       if (!depRes.rows.length) {
         return c.json(
-          {
-            ok: false,
-            error: 'dependency_not_found',
-            dependencyId: effectiveDependsOn,
-          },
+          { ok: false, error: 'dependency_not_found', dependencyId: effectiveDependsOn },
           400
         )
       }
@@ -84,12 +86,18 @@ export default async function updatePlanHandler(c: Context) {
       }
     }
 
-    // 4) Construction dynamique du UPDATE
+    // auto-status si actualMinutes > 0
+    const patchWithStatus: any = { ...p }
+    if (p.actualMinutes != null && p.actualMinutes > 0 && !p.status) {
+      patchWithStatus.status = 'done'
+    }
+
+    // UPDATE dynamique
     const fields: string[] = []
     const vals: any[] = []
     let i = 1
 
-    for (const [k, v] of Object.entries(p)) {
+    for (const [k, v] of Object.entries(patchWithStatus)) {
       if (v === undefined) continue
       const col = (
         {
@@ -98,7 +106,8 @@ export default async function updatePlanHandler(c: Context) {
           actualMinutes: 'actual_minutes',
           dueAt: 'due_at',
           note: 'note',
-          dependsOn: 'depends_on', 
+          dependsOn: 'depends_on',
+          status: 'status',
         } as any
       )[k]
 
@@ -120,11 +129,12 @@ export default async function updatePlanHandler(c: Context) {
          id,
          title,
          expected_minutes AS "expectedMinutes",
-         actual_minutes AS "actualMinutes",
-         due_at AS "dueAt",
+         actual_minutes   AS "actualMinutes",
+         due_at           AS "dueAt",
          note,
-         depends_on AS "dependsOn",
-         created_at AS "createdAt"`,
+         depends_on       AS "dependsOn",
+         status,
+         created_at       AS "createdAt"`,
       vals
     )
 
@@ -134,7 +144,7 @@ export default async function updatePlanHandler(c: Context) {
 
     const planRow = rows[0]
 
-    // 🔥 Mongo : sync de la vue "plans"
+    // Mongo "plans"
     const db = await getMongoDb()
     await db.collection('plans').updateOne(
       { pgId: planRow.id },
@@ -146,22 +156,22 @@ export default async function updatePlanHandler(c: Context) {
           dueAt: planRow.dueAt,
           note: planRow.note,
           dependsOn: planRow.dependsOn ?? null,
+          status: planRow.status,
           updatedAt: new Date(),
         },
       },
       { upsert: true }
     )
 
-    // 🔥 Mongo : event "plan_updated"
+    // Mongo event
     await db.collection('events').insertOne({
       type: 'plan_updated',
       at: new Date(),
       planId: planRow.id,
-      patch: p,
+      patch: patchWithStatus,
     })
 
-
-    return c.json({ ok: true, plan: rows[0] })
+    return c.json({ ok: true, plan: planRow })
   } catch (e: any) {
     if (e instanceof ZodError) {
       return c.json({ ok: false, error: 'validation', issues: e.errors }, 400)

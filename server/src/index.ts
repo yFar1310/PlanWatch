@@ -10,6 +10,9 @@ import listPlansHandler from './routes/plans.js';
 import getPlanHandler from './routes/getPlan.js'
 import updatePlanHandler from './routes/updatePlan.js'
 import deletePlanHandler from './routes/deletePlan.js'
+import activityHandler from './routes/activity.js';
+import statsHandler from './routes/stats.js';
+import pertHandler from './routes/pert.js'
 import { cors } from 'hono/cors';
 dotenv.config();
 
@@ -33,9 +36,17 @@ app.use(
 app.get('/health', healthHandler);
 app.post('/api/submit', submitHandler);
 app.get('/api/plans', listPlansHandler);
-app.get('/api/plans/:id', getPlanHandler)
-app.patch('/api/plans/:id', updatePlanHandler)
-app.delete('/api/plans/:id', deletePlanHandler)
+app.get('/api/plans/:id', getPlanHandler);
+app.patch('/api/plans/:id', updatePlanHandler);
+app.delete('/api/plans/:id', deletePlanHandler);
+
+// Stats & Activities
+app.get('/api/stats', statsHandler);
+app.get('/api/activity', activityHandler);
+
+// Méthode PERT
+app.get('/api/pert', pertHandler);
+
 
 // DB schema (index utile pour les requêtes par date)
 async function ensureSchema() {
