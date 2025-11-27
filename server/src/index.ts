@@ -2,18 +2,20 @@
 import dotenv from 'dotenv';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
+import { cors } from 'hono/cors';
+
 import healthHandler from './routes/health.js';
 import submitHandler from './routes/submit.js';
 import { pool } from './db/pg.js';
 import { getMongoDb, closeMongo } from './db/mongo.js';
 import listPlansHandler from './routes/plans.js';
-import getPlanHandler from './routes/getPlan.js'
-import updatePlanHandler from './routes/updatePlan.js'
-import deletePlanHandler from './routes/deletePlan.js'
+import getPlanHandler from './routes/getPlan.js';
+import updatePlanHandler from './routes/updatePlan.js';
+import deletePlanHandler from './routes/deletePlan.js';
 import activityHandler from './routes/activity.js';
 import statsHandler from './routes/stats.js';
-import pertHandler from './routes/pert.js'
-import { cors } from 'hono/cors';
+import pertHandler from './routes/pert.js';
+
 dotenv.config();
 
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -22,7 +24,7 @@ const ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
 
 const app = new Hono();
 
-// Security & CORS
+// ---------------------------- CORS & security ------------------------------
 app.use(
   '*',
   cors({
@@ -33,22 +35,20 @@ app.use(
   })
 );
 
+// ------------------------------- Routes -----------------------------------
 app.get('/health', healthHandler);
 app.post('/api/submit', submitHandler);
+
 app.get('/api/plans', listPlansHandler);
 app.get('/api/plans/:id', getPlanHandler);
 app.patch('/api/plans/:id', updatePlanHandler);
 app.delete('/api/plans/:id', deletePlanHandler);
 
-// Stats & Activities
 app.get('/api/stats', statsHandler);
 app.get('/api/activity', activityHandler);
-
-// Méthode PERT
 app.get('/api/pert', pertHandler);
 
-
-// DB schema (index utile pour les requêtes par date)
+// -------------------------- DB schema (Postgres) ---------------------------
 async function ensureSchema() {
   const sql = `
     CREATE TABLE IF NOT EXISTS plans (
@@ -66,26 +66,58 @@ async function ensureSchema() {
   await pool.query(sql);
 }
 
+// --------------------------- App bootstrap ---------------------------------
 async function start() {
+  console.log('Boot config', {
+    HOST,
+    PORT,
+    POSTGRES_URL: process.env.POSTGRES_URL,
+    MONGO_URL: process.env.MONGO_URL,
+    CORS_ORIGIN: ORIGIN,
+  });
+
+  // Postgres
   try {
     await pool.query('SELECT 1');
-    await getMongoDb();
+    console.log('[PG] Connection OK');
     await ensureSchema();
-    console.log('DBs ready. Starting server…');
-    serve({ fetch: app.fetch, port: PORT, hostname: HOST });
+    console.log('[PG] Schema OK');
   } catch (e) {
-    console.error('Failed to start', e);
-    process.exit(1);
+    console.error('[PG] Connection or schema FAILED:', e);
   }
-}
-start();
 
-// graceful shutdown
+  // Mongo
+  try {
+    await getMongoDb();
+    console.log('[Mongo] Connection OK');
+  } catch (e) {
+    console.error('[Mongo] Connection FAILED:', e);
+  }
+
+  console.log('Starting HTTP server…');
+  serve({ fetch: app.fetch, port: PORT, hostname: HOST });
+}
+
+start().catch((e) => {
+  // dernier filet de sécurité (au cas où)
+  console.error('Fatal error during startup', e);
+});
+
+// --------------------------- Graceful shutdown -----------------------------
 async function shutdown() {
   console.log('Shutting down…');
-  try { await pool.end(); } catch {}
-  try { await closeMongo(); } catch {}
+  try {
+    await pool.end();
+  } catch (e) {
+    console.error('Error while closing Postgres pool', e);
+  }
+  try {
+    await closeMongo();
+  } catch (e) {
+    console.error('Error while closing Mongo connection', e);
+  }
   process.exit(0);
 }
+
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
