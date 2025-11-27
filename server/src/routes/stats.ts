@@ -7,13 +7,14 @@ export default async function statsHandler(c: Context) {
       COALESCE(SUM(expected_minutes) FILTER (WHERE due_at::date = CURRENT_DATE), 0) AS today_expected,
       COALESCE(SUM(actual_minutes)   FILTER (WHERE due_at::date = CURRENT_DATE), 0) AS today_actual,
       COUNT(*)  FILTER (WHERE due_at::date = CURRENT_DATE)::int AS today_count,
-      COUNT(*)  FILTER (
-        WHERE due_at::date > CURRENT_DATE
-          AND due_at < CURRENT_DATE + INTERVAL '7 days'
-      )::int AS upcoming_count,
-      COUNT(*)  FILTER (WHERE depends_on IS NOT NULL)::int AS deps_count
-    FROM plans;
-  `);
+      COUNT(*) FILTER (
+      WHERE due_at >= now()
+        AND due_at < now() + interval '7 days'
+        AND array_length(depends_on, 1) > 0
+    ) AS "plansWithDependency"
+  FROM plans
+  WHERE status = 'active'
+`);
 
   const row = rows[0] ?? {};
 

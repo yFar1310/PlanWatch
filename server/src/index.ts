@@ -84,181 +84,129 @@ async function ensureSchema() {
 
   // Seed de base si la table est vide (3 tâches)
   const seedSql = `
-    INSERT INTO plans (title, expected_minutes, actual_minutes, due_at, note, depends_on, status)
-    SELECT
-      title,
-      expected_minutes,
-      actual_minutes,
-      due_at,
-      note,
-      depends_on,
-      status
-    FROM (
-      VALUES
-        (
-          'Define project scope',
-          30::INT,
-          NULL::INT,
-          (now() - interval '3 days')::TIMESTAMPTZ,
-          'High-level objectives and constraints.'::TEXT,
-          ARRAY[]::INT[],
-          'active'::TEXT
-        ),
-        (
-          'Research existing tools',
-          45::INT,
-          NULL::INT,
-          (now() - interval '2 days')::TIMESTAMPTZ,
-          'Look at Notion, Linear, etc.'::TEXT,
-          ARRAY[]::INT[],
-          'active'::TEXT
-        ),
-        (
-          'Prepare NoSQL report',
-          120::INT,
-          NULL::INT,
-          (now() - interval '1 day')::TIMESTAMPTZ,
-          'Outline sections and main ideas.'::TEXT,
-          ARRAY[]::INT[],
-          'active'::TEXT
-        ),
-        (
-          'Design PlanWatch data model',
-          60::INT,
-          NULL::INT,
-          (now())::TIMESTAMPTZ,
-          'Postgres schema + Mongo events.'::TEXT,
-          ARRAY[]::INT[],
-          'active'::TEXT
-        ),
-        (
-          'Implement backend API',
-          90::INT,
-          NULL::INT,
-          (now() + interval '1 day')::TIMESTAMPTZ,
-          'Hono routes, validation and CORS.'::TEXT,
-          ARRAY[]::INT[],
-          'active'::TEXT
-        ),
-        (
-          'Implement PlanWatch PERT',
-          90::INT,
-          NULL::INT,
-          (now() + interval '2 days')::TIMESTAMPTZ,
-          'Refine PERT algorithm and UI.'::TEXT,
-          ARRAY[]::INT[],
-          'active'::TEXT
-        ),
-        (
-          'Implement dashboard cards',
-          50::INT,
-          NULL::INT,
-          (now() + interval '3 days')::TIMESTAMPTZ,
-          'Today / Upcoming / Activity.'::TEXT,
-          ARRAY[]::INT[],
-          'active'::TEXT
-        ),
-        (
-          'Implement tasks board',
-          70::INT,
-          NULL::INT,
-          (now() + interval '4 days')::TIMESTAMPTZ,
-          'Not started / In progress / Done.'::TEXT,
-          ARRAY[]::INT[],
-          'active'::TEXT
-        ),
-        (
-          'Refactor dashboard UI',
-          60::INT,
-          NULL::INT,
-          (now() + interval '5 days')::TIMESTAMPTZ,
-          'Polish cards, colors and animations.'::TEXT,
-          ARRAY[]::INT[],
-          'active'::TEXT
-        ),
-        (
-          'Polish dark mode theme',
-          45::INT,
-          NULL::INT,
-          (now() + interval '6 days')::TIMESTAMPTZ,
-          'Fine-tune background and contrasts.'::TEXT,
-          ARRAY[]::INT[],
-          'active'::TEXT
-        ),
-        (
-          'Write project documentation',
-          80::INT,
-          NULL::INT,
-          (now() + interval '7 days')::TIMESTAMPTZ,
-          'README + technical notes.'::TEXT,
-          ARRAY[]::INT[],
-          'active'::TEXT
-        ),
-        (
-          'Final QA & presentation',
-          90::INT,
-          NULL::INT,
-          (now() + interval '8 days')::TIMESTAMPTZ,
-          'Manual tests + slides.'::TEXT,
-          ARRAY[]::INT[],
-          'active'::TEXT
-        )
-    ) AS seed(
-      title,
-      expected_minutes,
-      actual_minutes,
-      due_at,
-      note,
-      depends_on,
-      status
-    )
-    WHERE NOT EXISTS (SELECT 1 FROM plans);
+  INSERT INTO plans (title, expected_minutes, actual_minutes, due_at, note, depends_on, status)
+  SELECT
+    title,
+    expected_minutes,
+    actual_minutes,
+    due_at,
+    note,
+    depends_on,
+    status
+  FROM (
+    VALUES
+      -- 1: no dep
+      (
+        'Define project scope',
+        60::INT,
+        45::INT,
+        (now() - interval '3 days')::TIMESTAMPTZ,
+        'Clarify objectives and constraints.'::TEXT,
+        ARRAY[]::INT[],
+        'active'::TEXT
+      ),
+      -- 2: depends on 1
+      (
+        'Gather reference material',
+        90::INT,
+        80::INT,
+        (now() - interval '1 day')::TIMESTAMPTZ,
+        'Collect NoSQL papers & docs.'::TEXT,
+        ARRAY[1]::INT[],
+        'active'::TEXT
+      ),
+      -- 3: depends on 1
+      (
+        'Design PlanWatch data model',
+        75::INT,
+        NULL::INT,
+        (now())::TIMESTAMPTZ,
+        'Tables for plans, activity, PERT, users.'::TEXT,
+        ARRAY[1]::INT[],
+        'active'::TEXT
+      ),
+      -- 4: depends on 2
+      (
+        'Set up PostgreSQL schema',
+        60::INT,
+        NULL::INT,
+        (now() + interval '1 day')::TIMESTAMPTZ,
+        'Apply create.sql & indexes.'::TEXT,
+        ARRAY[2]::INT[],
+        'active'::TEXT
+      ),
+      -- 5: depends on 3 & 4 (on prendra surtout la première pour PERT)
+      (
+        'Implement stats & activity API',
+        90::INT,
+        NULL::INT,
+        (now() + interval '2 days')::TIMESTAMPTZ,
+        'Hono routes for stats, activity, pert.'::TEXT,
+        ARRAY[3,4]::INT[],
+        'active'::TEXT
+      ),
+      -- 6: depends on 5
+      (
+        'Build dashboard UI',
+        120::INT,
+        NULL::INT,
+        (now() + interval '4 days')::TIMESTAMPTZ,
+        'Cards, tasks board, recent activity.'::TEXT,
+        ARRAY[5]::INT[],
+        'active'::TEXT
+      ),
+      -- 7: depends on 5
+      (
+        'Implement PERT graph',
+        110::INT,
+        NULL::INT,
+        (now() + interval '5 days')::TIMESTAMPTZ,
+        'Cytoscape layout + critical path.'::TEXT,
+        ARRAY[5]::INT[],
+        'active'::TEXT
+      ),
+      -- 8: depends on 6 & 7
+      (
+        'Polish dark/light theme',
+        60::INT,
+        NULL::INT,
+        (now() + interval '7 days')::TIMESTAMPTZ,
+        'Background, cards, transitions.'::TEXT,
+        ARRAY[6,7]::INT[],
+        'active'::TEXT
+      ),
+      -- 9: depends on 8
+      (
+        'Write NoSQL report draft',
+        150::INT,
+        NULL::INT,
+        (now() + interval '10 days')::TIMESTAMPTZ,
+        'Explain choices, architecture, tradeoffs.'::TEXT,
+        ARRAY[8]::INT[],
+        'active'::TEXT
+      ),
+      -- 10: depends on 8
+      (
+        'Prepare project demo',
+        90::INT,
+        NULL::INT,
+        (now() + interval '14 days')::TIMESTAMPTZ,
+        'Record video + live demo script.'::TEXT,
+        ARRAY[8]::INT[],
+        'active'::TEXT
+      )
+  ) AS seed(
+    title,
+    expected_minutes,
+    actual_minutes,
+    due_at,
+    note,
+    depends_on,
+    status
+  )
+  WHERE NOT EXISTS (SELECT 1 FROM plans);
+`;
 
-    -- Dépendances pour PERT (on les pose par titre, donc pas besoin de connaître les IDs)
-    UPDATE plans p
-    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Define project scope')]
-    WHERE p.title = 'Research existing tools';
-
-    UPDATE plans p
-    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Research existing tools')]
-    WHERE p.title = 'Prepare NoSQL report';
-
-    UPDATE plans p
-    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Prepare NoSQL report')]
-    WHERE p.title = 'Design PlanWatch data model';
-
-    UPDATE plans p
-    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Design PlanWatch data model')]
-    WHERE p.title = 'Implement backend API';
-
-    UPDATE plans p
-    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Implement backend API')]
-    WHERE p.title = 'Implement PlanWatch PERT';
-
-    UPDATE plans p
-    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Implement backend API')]
-    WHERE p.title = 'Implement dashboard cards';
-
-    UPDATE plans p
-    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Implement dashboard cards')]
-    WHERE p.title = 'Implement tasks board';
-
-    UPDATE plans p
-    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Implement tasks board')]
-    WHERE p.title = 'Refactor dashboard UI';
-
-    UPDATE plans p
-    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Refactor dashboard UI')]
-    WHERE p.title = 'Polish dark mode theme';
-
-    UPDATE plans p
-    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Polish dark mode theme')]
-    WHERE p.title = 'Write project documentation';
-
-    UPDATE plans p
-    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Write project documentation')]
-    WHERE p.title = 'Final QA & presentation';
-  `;
   await pool.query(seedSql);
 }
 
