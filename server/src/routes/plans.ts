@@ -30,6 +30,7 @@ export default async function listPlansHandler(c: Context) {
       actual_minutes     AS "actualMinutes",
       due_at             AS "dueAt",
       note,
+      depends_on         AS "dependsOn",
       created_at         AS "createdAt"
     FROM plans
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}

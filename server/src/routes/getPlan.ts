@@ -9,7 +9,9 @@ export default async function getPlanHandler(c: Context) {
       expected_minutes AS "expectedMinutes",
       actual_minutes   AS "actualMinutes",
       due_at           AS "dueAt",
-      note, created_at AS "createdAt"
+      note,
+      depends_on       AS "dependsOn",
+      created_at       AS "createdAt"
     FROM plans WHERE id = $1
   `, [id])
   if (!rows.length) return c.json({ ok:false, error:'not_found' }, 404)

@@ -26,9 +26,26 @@
           :minutes-increment="5"
           :auto-apply="true"
           :teleport="false"
+          :min-date="dependencyMinDate"
           placeholder="Select date & time"
         />
       </Field>
+
+      <Field label="Depends on (optional)">
+      <select
+        v-model="form.dependsOn"
+        class="block w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/60"
+      >
+        <option :value="null">No dependency</option>
+        <option
+          v-for="p in allPlans"
+          :key="p.id"
+          :value="p.id"
+        >
+          {{ p.title }}
+        </option>
+      </select>
+    </Field>
 
       <Field label="Note">
         <Textarea v-model="form.note" maxlength="500" />
@@ -89,19 +106,41 @@ const form = reactive({
   expectedMinutes: 60,
   actualMinutes: undefined as number | undefined,
   dueAt: null as Date | null,
-  note: ''
+  note: '',
+  dependsOn: null as number | null
+})
+
+const allPlans = ref<Plan[]>([])
+
+const dependency = computed<Plan | null>(() => {
+  if (!form.dependsOn) return null
+  return allPlans.value.find((p: any) => Number(p.id) === Number(form.dependsOn)) ?? null
+})
+
+// date minimale autorisée dans le datepicker
+const dependencyMinDate = computed<Date | undefined>(() => {
+  if (!dependency.value) return undefined
+  return new Date(dependency.value.dueAt)
 })
 
 onMounted(async () => {
   try {
-    const p = await api.getPlan(id)
-    // sécurité si l’API renvoie un wrapper { plan }
+    const [listRes, p] = await Promise.all([
+      api.listPlans(),
+      api.getPlan(id),
+    ])
+
     const plan: Plan = (p?.plan ?? p) as Plan
+    const items: Plan[] = Array.isArray(listRes.items) ? listRes.items : listRes
+
+    allPlans.value = items.filter((x) => Number(x.id) !== id)
+
     form.title = plan.title
     form.expectedMinutes = plan.expectedMinutes
     form.actualMinutes = plan.actualMinutes ?? undefined
     form.dueAt = plan.dueAt ? new Date(plan.dueAt) : null
     form.note = plan.note ?? ''
+    form.dependsOn = (plan.dependsOn ?? null) as number | null
   } catch (e: any) {
     error.value = e?.message ?? String(e)
   } finally {
@@ -130,7 +169,8 @@ async function save() {
       expectedMinutes: Number(form.expectedMinutes),
       actualMinutes: form.actualMinutes ?? undefined,
       dueAt: form.dueAt ? toIsoUtc(form.dueAt) : undefined,
-      note: form.note?.trim() || undefined
+      note: form.note?.trim() || undefined,
+      dependsOn: form.dependsOn ?? null,
     }
     await api.updatePlan(id, patch)
     showSaved.value = true

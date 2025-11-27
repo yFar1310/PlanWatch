@@ -17,6 +17,7 @@
             <th class="py-2 pr-4">Title</th>
             <th class="py-2 pr-4">Expected</th>
             <th class="py-2 pr-4">Due</th>
+            <th class="py-2 pr-4">Dependency</th>
             <th class="py-2 pr-0 text-right">Actions</th>
           </tr>
         </thead>
@@ -46,6 +47,25 @@
             <td class="py-3 pr-4">{{ p.title }}</td>
             <td class="py-3 pr-4">{{ p.expectedMinutes }} min</td>
             <td class="py-3 pr-4">{{ new Date(p.dueAt).toLocaleString() }}</td>
+            <td class="py-3 pr-4">
+            <template v-if="getDependency(p)">
+              <div
+                class="inline-flex items-center gap-1 rounded-full bg-indigo-500/10 px-2 py-1 text-xs text-indigo-300"
+              >
+                <span>After</span>
+                <span class="font-semibold">
+                  {{ getDependency(p)?.title }}
+                </span>
+              </div>
+              <span
+                v-if="isDependencyInconsistent(p)"
+                class="ml-2 text-xs text-amber-400"
+              >
+                ⚠ invalid order
+              </span>
+            </template>
+            <span v-else class="text-xs text-gray-500">None</span>
+          </td>
             <td class="py-3 pr-0 text-right">
               <RouterLink
                 :to="`/plans/${p.id}/edit`"
@@ -113,6 +133,19 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function getDependency(p: Plan) {
+  if (!(p as any).dependsOn) return null
+  const depId = Number((p as any).dependsOn)
+  return plans.value.find((x: any) => Number(x.id) === depId) ?? null
+}
+
+// (optionnel) permet de repérer les vieux cas incohérents encore en BDD
+function isDependencyInconsistent(p: Plan) {
+  const dep = getDependency(p)
+  if (!dep) return false
+  return new Date(p.dueAt) < new Date(dep.dueAt)
 }
 
 onMounted(load)

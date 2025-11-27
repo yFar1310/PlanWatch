@@ -1,6 +1,7 @@
 import type { Context } from 'hono'
 import { z, ZodError } from 'zod'
 import { pool } from '../db/pg.js'
+import { getMongoDb } from '../db/mongo.js'
 
 const patchSchema = z.object({
   title: z.string().trim().min(3).max(200).optional(),
@@ -13,41 +14,159 @@ const patchSchema = z.object({
     return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds())).toISOString()
   }).optional(),
   note: z.string().trim().max(500).nullable().optional(),
+  dependsOn: z.number().int().positive().nullable().optional(),
 })
 
 export default async function updatePlanHandler(c: Context) {
   const id = Number(c.req.param('id'))
-  if (!Number.isInteger(id) || id <= 0) return c.json({ ok:false, error:'bad_id' }, 400)
+  if (!Number.isInteger(id) || id <= 0) {
+    return c.json({ ok: false, error: 'bad_id' }, 400)
+  }
+
   try {
     const body = await c.req.json()
     const p = patchSchema.parse(body)
+
+    // 1) On récupère l’état actuel du plan
+    const currentRes = await pool.query(
+      'SELECT id, due_at, depends_on FROM plans WHERE id = $1',
+      [id]
+    )
+    if (!currentRes.rows.length) {
+      return c.json({ ok: false, error: 'not_found' }, 404)
+    }
+    const current = currentRes.rows[0]
+
+    // 2) On calcule les valeurs "effectives" après patch
+    const effectiveDueAtIso: string = p.dueAt ?? current.due_at
+    const effectiveDependsOn: number | null =
+      p.dependsOn !== undefined ? p.dependsOn : current.depends_on
+
+    // 3) Règle de cohérence sur la dépendance
+    if (effectiveDependsOn != null) {
+      // interdit de dépendre de soi-même
+      if (effectiveDependsOn === id) {
+        return c.json(
+          { ok: false, error: 'self_dependency', message: 'A plan cannot depend on itself.' },
+          400
+        )
+      }
+
+      const depRes = await pool.query(
+        'SELECT id, title, due_at FROM plans WHERE id = $1',
+        [effectiveDependsOn]
+      )
+      if (!depRes.rows.length) {
+        return c.json(
+          {
+            ok: false,
+            error: 'dependency_not_found',
+            dependencyId: effectiveDependsOn,
+          },
+          400
+        )
+      }
+
+      const dep = depRes.rows[0]
+      const depDue = new Date(dep.due_at)
+      const thisDue = new Date(effectiveDueAtIso)
+
+      if (thisDue < depDue) {
+        return c.json(
+          {
+            ok: false,
+            error: 'invalid_dependency_due_at',
+            message: `Due date must be after or equal to dependency "${dep.title}".`,
+            dependencyDueAt: depDue.toISOString(),
+          },
+          400
+        )
+      }
+    }
+
+    // 4) Construction dynamique du UPDATE
     const fields: string[] = []
     const vals: any[] = []
     let i = 1
+
     for (const [k, v] of Object.entries(p)) {
       if (v === undefined) continue
-      const col = ({
-        title:'title',
-        expectedMinutes:'expected_minutes',
-        actualMinutes:'actual_minutes',
-        dueAt:'due_at',
-        note:'note',
-      } as any)[k]
+      const col = (
+        {
+          title: 'title',
+          expectedMinutes: 'expected_minutes',
+          actualMinutes: 'actual_minutes',
+          dueAt: 'due_at',
+          note: 'note',
+          dependsOn: 'depends_on', 
+        } as any
+      )[k]
+
       fields.push(`${col} = $${i++}`)
       vals.push(v)
     }
-    if (!fields.length) return c.json({ ok:false, error:'empty_patch' }, 400)
+
+    if (!fields.length) {
+      return c.json({ ok: false, error: 'empty_patch' }, 400)
+    }
+
     vals.push(id)
+
     const { rows } = await pool.query(
-      `UPDATE plans SET ${fields.join(', ')} WHERE id = $${i} RETURNING id, title,
-        expected_minutes AS "expectedMinutes", actual_minutes AS "actualMinutes",
-        due_at AS "dueAt", note, created_at AS "createdAt"`,
+      `UPDATE plans
+       SET ${fields.join(', ')}
+       WHERE id = $${i}
+       RETURNING
+         id,
+         title,
+         expected_minutes AS "expectedMinutes",
+         actual_minutes AS "actualMinutes",
+         due_at AS "dueAt",
+         note,
+         depends_on AS "dependsOn",
+         created_at AS "createdAt"`,
       vals
     )
-    if (!rows.length) return c.json({ ok:false, error:'not_found' }, 404)
-    return c.json({ ok:true, plan: rows[0] })
-  } catch (e:any) {
-    if (e instanceof ZodError) return c.json({ ok:false, error:'validation', issues:e.errors }, 400)
-    return c.json({ ok:false, error:'internal' }, 500)
+
+    if (!rows.length) {
+      return c.json({ ok: false, error: 'not_found' }, 404)
+    }
+
+    const planRow = rows[0]
+
+    // 🔥 Mongo : sync de la vue "plans"
+    const db = await getMongoDb()
+    await db.collection('plans').updateOne(
+      { pgId: planRow.id },
+      {
+        $set: {
+          title: planRow.title,
+          expectedMinutes: planRow.expectedMinutes,
+          actualMinutes: planRow.actualMinutes,
+          dueAt: planRow.dueAt,
+          note: planRow.note,
+          dependsOn: planRow.dependsOn ?? null,
+          updatedAt: new Date(),
+        },
+      },
+      { upsert: true }
+    )
+
+    // 🔥 Mongo : event "plan_updated"
+    await db.collection('events').insertOne({
+      type: 'plan_updated',
+      at: new Date(),
+      planId: planRow.id,
+      patch: p,
+    })
+
+
+    return c.json({ ok: true, plan: rows[0] })
+  } catch (e: any) {
+    if (e instanceof ZodError) {
+      return c.json({ ok: false, error: 'validation', issues: e.errors }, 400)
+    }
+    console.error('updatePlan error', e)
+    return c.json({ ok: false, error: 'internal' }, 500)
   }
 }

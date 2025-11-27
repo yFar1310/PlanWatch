@@ -13,6 +13,8 @@ async function migrate() {
     due_at TIMESTAMPTZ NOT NULL,
     note TEXT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    depends_on INT NULL REFERENCES plans(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   `;
 

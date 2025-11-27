@@ -8,17 +8,16 @@ const bodySchema = z.object({
   title: z.string().trim().min(3).max(200),
   expectedMinutes: z.coerce.number().int().gt(0),
   actualMinutes: z.coerce.number().int().min(0).optional(),
-  // accepte string/Date, normalise en ISO (UTC) et vérifie la validité
   dueAt: z.union([z.string(), z.date()]).transform((v) => {
     const d = typeof v === 'string' ? new Date(v) : v;
     if (Number.isNaN(d.getTime())) throw new Error('Invalid date');
-    // on stocke en ISO UTC
     return new Date(Date.UTC(
       d.getFullYear(), d.getMonth(), d.getDate(),
       d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()
     )).toISOString();
   }),
   note: z.string().trim().max(500).optional(),
+  dependsOn: z.coerce.number().int().positive().optional(),
 });
 
 export default async function submitHandler(c: Context) {
@@ -31,21 +30,52 @@ export default async function submitHandler(c: Context) {
     const json = await c.req.json();
     const parsed = bodySchema.parse(json);
 
+    if (parsed.dependsOn) {
+      const { rows: depRows } = await pool.query(
+        'SELECT id, title, due_at FROM plans WHERE id = $1',
+        [parsed.dependsOn]
+      );
+    
+      if (!depRows.length) {
+        return c.json(
+          { ok: false, error: 'dependency_not_found', dependencyId: parsed.dependsOn },
+          400
+        );
+      }
+    
+      const dep = depRows[0];
+      const depDue = new Date(dep.due_at);
+      const thisDue = new Date(parsed.dueAt);
+    
+      if (thisDue < depDue) {
+        return c.json(
+          {
+            ok: false,
+            error: 'invalid_dependency_due_at',
+            message: `Due date must be after or equal to dependency "${dep.title}".`,
+            dependencyDueAt: depDue.toISOString(),
+          },
+          400
+        );
+      }
+    }
+
     client = await pool.connect();
     await client.query('BEGIN');
 
     const q = `
-      INSERT INTO plans (title, expected_minutes, actual_minutes, due_at, note)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, title, expected_minutes, actual_minutes, due_at, note, created_at
-    `;
-    const values = [
-      parsed.title,
-      parsed.expectedMinutes,
-      parsed.actualMinutes ?? null,
-      parsed.dueAt,           // déjà ISO UTC
-      parsed.note ?? null,
-    ];
+    INSERT INTO plans (title, expected_minutes, actual_minutes, due_at, note, depends_on)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING id, title, expected_minutes, actual_minutes, due_at, note, depends_on, created_at
+  `;
+  const values = [
+    parsed.title,
+    parsed.expectedMinutes,
+    parsed.actualMinutes ?? null,
+    parsed.dueAt,           // déjà ISO UTC
+    parsed.note ?? null,
+    parsed.dependsOn ?? null, 
+  ];
 
     const { rows } = await client.query(q, values);
     const plan = rows[0];
@@ -55,6 +85,7 @@ export default async function submitHandler(c: Context) {
       type: 'plan_submitted',
       at: new Date(),
       planId: plan.id,
+      dependsOn: parsed.dependsOn ?? null,
       payload: parsed,
     });
 

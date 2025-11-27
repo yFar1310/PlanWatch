@@ -23,10 +23,27 @@
             :seconds-increment="1"
             :clearable="true"
             :auto-apply="true"
+            :min-date="dependencyMinDate"
             placeholder="Select date & time"
             :teleport="false" 
             />
         </Field>
+
+        <Field label="Depends on (optional)">
+        <select
+          v-model="form.dependsOn"
+          class="block w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/60"
+        >
+          <option :value="null">No dependency</option>
+          <option
+            v-for="p in allPlans"
+            :key="p.id"
+            :value="p.id"
+          >
+            {{ p.title }}
+          </option>
+        </select>
+      </Field>
 
 			<Field label="Note">
 				<Textarea v-model="form.note" maxlength="500" />
@@ -80,7 +97,7 @@
 	</Card>
 </template>
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import Card from '../components/ui/Card.vue'
 import Field from '../components/ui/Field.vue'
 import Input from '../components/ui/Input.vue'
@@ -96,7 +113,6 @@ import { useRouter } from 'vue-router';
 const router = useRouter();
 import Modal from '../components/common/Modal.vue'
 import { CheckCircle } from 'lucide-vue-next'
-const showSuccess = ref(false)
 import AlertMessage from '../components/common/AlertMessage.vue'
 
 const form = reactive({
@@ -104,14 +120,24 @@ const form = reactive({
 	expectedMinutes: 60,
 	actualMinutes: undefined as number | undefined,
 	dueAt: null as Date | null,  
-	note: ''
+	note: '',
+  dependsOn: null as number | null,
 })
 
 const loading = ref(false)
 const response = ref<string | null>(null)
 const error = ref<string | null>(null)
+const showSuccess = ref(false)
+const allPlans = ref<Plan[]>([])
 
-
+onMounted(async () => {
+  try {
+    const r = await api.listPlans()
+    allPlans.value = Array.isArray(r.items) ? r.items : r
+  } catch (e) {
+    console.warn('Failed to load plans for dependency select', e)
+  }
+})
 function toIsoUtc(d: Date) {
   // force UTC ISO stable
   return new Date(
@@ -143,6 +169,7 @@ async function submit() {
       actualMinutes: form.actualMinutes === undefined ? undefined : Number(form.actualMinutes),
       dueAt: toIsoUtc(form.dueAt as Date),
       note: form.note?.trim() || undefined,
+      ...(form.dependsOn ? { dependsOn: form.dependsOn } : {}),
     };
     const j = await api.submitPlan(payload);
     response.value = JSON.stringify(j, null, 2);
