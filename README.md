@@ -54,31 +54,13 @@ PlanWatch/
 
 ## ⚡ Démarrage rapide
 
-### Option A — Local (sans Docker) 🧑‍💻
 
-**API**
-```bash
-cd server
-cp .env.example .env
-npm i
-npm run dev
-# → http://localhost:3000
-```
 
-**Web**
-```bash
-cd web
-cp .env.example .env
-npm i
-npm run dev
-# → http://localhost:5173
-```
 
 ### Option B — Full Docker 🐳
 
 ```bash
 cd infra
-docker compose up --build
 ```
 
 - Web : `http://localhost:5173`
