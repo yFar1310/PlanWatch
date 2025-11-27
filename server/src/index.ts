@@ -26,9 +26,9 @@ const app = new Hono();
 app.use(
   '*',
   cors({
-    origin: 'http://localhost:5173',               // ou une fonction si tu veux whitelister
-    allowMethods: ['GET','POST','PATCH','DELETE','OPTIONS'],
-    allowHeaders: ['Content-Type','Authorization'],
+    origin: ORIGIN,
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
     maxAge: 86400,
   })
 );
