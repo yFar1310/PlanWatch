@@ -367,157 +367,184 @@ function formatDateShort(iso: string) {
       </section>
     </div>
 
-    <!-- Tasks board, Notion-style -->
-    <section class="space-y-4">
-      <div class="flex items-center justify-between">
-        <h2 class="text-sm font-semibold text-gray-200">Tasks</h2>
-        <div class="inline-flex rounded-full bg-gray-900/70 border border-gray-800 p-1 text-xs">
-          <button
-            v-for="opt in taskFilterOptions"
-            :key="opt.value"
-            type="button"
-            class="px-3 py-1 rounded-full transition"
-            :class="opt.value === taskFilter
-              ? 'bg-gray-800 text-white shadow-sm'
-              : 'text-gray-400 hover:text-gray-100'"
-            @click="taskFilter = opt.value"
-          >
-            {{ opt.label }}
-          </button>
-        </div>
-      </div>
-
-      <div v-if="plansLoading" class="grid md:grid-cols-3 gap-4">
-        <div
-          v-for="i in 3"
-          :key="i"
-          class="rounded-2xl border border-gray-800/80 bg-gray-900/40 p-4 space-y-3"
-        >
-          <div class="h-4 w-24 rounded bg-gray-800 animate-pulse" />
-          <div class="space-y-2">
-            <div class="h-10 rounded-xl bg-gray-800 animate-pulse" />
-            <div class="h-10 rounded-xl bg-gray-800 animate-pulse" />
-          </div>
-        </div>
-      </div>
-
-      <p v-else-if="plansError" class="text-sm text-red-500">
-        {{ plansError }}
-      </p>
-
-      <div
-        v-else
-        class="grid md:grid-cols-3 gap-4"
+        <!-- Tasks board -->
+       <!-- Tasks board -->
+<section class="mt-8 space-y-4">
+  <div class="flex items-center justify-between">
+    <h2 class="text-sm font-semibold text-slate-900 dark:text-slate-200">
+      Tasks
+    </h2>
+    <div
+      class="inline-flex rounded-full bg-slate-100 border border-slate-200 p-1 text-xs
+             dark:bg-slate-900/70 dark:border-slate-800"
+    >
+      <button
+        v-for="opt in taskFilterOptions"
+        :key="opt.value"
+        type="button"
+        class="px-3 py-1 rounded-full transition"
+        :class="opt.value === taskFilter
+          ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+          : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'"
+        @click="taskFilter = opt.value"
       >
-        <!-- Not started -->
-        <div class="rounded-2xl border border-gray-800/80 bg-gray-950/40 flex flex-col">
-          <div class="px-4 py-3 flex items-center justify-between">
-            <span class="text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Not started
-            </span>
-            <span class="text-xs text-gray-500">
-              {{ boardByStatus.notStarted.length }}
-            </span>
-          </div>
-          <div class="px-4 pb-4 space-y-2 flex-1">
-            <div
-              v-for="p in boardByStatus.notStarted"
-              :key="p.id"
-              class="rounded-xl border border-gray-800 bg-gray-900/60 px-3 py-2 text-xs space-y-1"
-            >
-              <div class="font-medium text-gray-100 truncate">
-                {{ p.title }}
-              </div>
-              <div class="flex items-center justify-between text-[11px] text-gray-400">
-                <span>{{ formatDateShort(p.dueAt) }}</span>
-                <span
-                  v-tooltip="statusBadge(p).label"
-                  :class="badgeClass(statusBadge(p).variant)"
-                >
-                  {{ statusBadge(p).label }}
-                </span>
-              </div>
-            </div>
-            <p
-              v-if="!boardByStatus.notStarted.length"
-              class="text-xs text-gray-500"
-            >
-              No tasks in this column.
-            </p>
-          </div>
-        </div>
+        {{ opt.label }}
+      </button>
+    </div>
+  </div>
 
-        <!-- In progress -->
-        <div class="rounded-2xl border border-gray-800/80 bg-gray-950/40 flex flex-col">
-          <div class="px-4 py-3 flex items-center justify-between">
-            <span class="text-xs font-semibold uppercase tracking-wide text-gray-400">
-              In progress
-            </span>
-            <span class="text-xs text-gray-500">
-              {{ boardByStatus.inProgress.length }}
-            </span>
-          </div>
-          <div class="px-4 pb-4 space-y-2 flex-1">
-            <div
-              v-for="p in boardByStatus.inProgress"
-              :key="p.id"
-              class="rounded-xl border border-gray-800 bg-gray-900/60 px-3 py-2 text-xs space-y-1"
-            >
-              <div class="font-medium text-gray-100 truncate">
-                {{ p.title }}
-              </div>
-              <div class="flex items-center justify-between text-[11px] text-gray-400">
-                <span>{{ formatDateShort(p.dueAt) }}</span>
-                <span :class="badgeClass(statusBadge(p).variant)">
-                  {{ statusBadge(p).label }}
-                </span>
-              </div>
-            </div>
-            <p
-              v-if="!boardByStatus.inProgress.length"
-              class="text-xs text-gray-500"
-            >
-              Nothing in progress.
-            </p>
-          </div>
-        </div>
-
-        <!-- Done -->
-        <div class="rounded-2xl border border-gray-800/80 bg-gray-950/40 flex flex-col">
-          <div class="px-4 py-3 flex items-center justify-between">
-            <span class="text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Done
-            </span>
-            <span class="text-xs text-gray-500">
-              {{ boardByStatus.done.length }}
-            </span>
-          </div>
-          <div class="px-4 pb-4 space-y-2 flex-1">
-            <div
-              v-for="p in boardByStatus.done"
-              :key="p.id"
-              class="rounded-xl border border-gray-800 bg-gray-900/60 px-3 py-2 text-xs space-y-1"
-            >
-              <div class="font-medium text-gray-100 truncate">
-                {{ p.title }}
-              </div>
-              <div class="flex items-center justify-between text-[11px] text-gray-400">
-                <span>{{ formatDateShort(p.dueAt) }}</span>
-                <span :class="badgeClass(statusBadge(p).variant)">
-                  {{ statusBadge(p).label }}
-                </span>
-              </div>
-            </div>
-            <p
-              v-if="!boardByStatus.done.length"
-              class="text-xs text-gray-500"
-            >
-              No completed tasks yet.
-            </p>
-          </div>
-        </div>
+  <!-- 3 colonnes : Not started / In progress / Done -->
+  <div class="grid gap-4 lg:grid-cols-3">
+    <!-- NOT STARTED -->
+    <div
+      class="rounded-2xl border border-slate-200/70 bg-white/80 backdrop-blur
+             dark:border-slate-800/80 dark:bg-slate-950/60 flex flex-col"
+    >
+      <div class="px-4 py-3 flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Not started
+        </span>
+        <span class="text-xs text-slate-400 dark:text-slate-500">
+          {{ boardByStatus.notStarted.length }}
+        </span>
       </div>
-    </section>
+
+      <div class="px-4 pb-4 space-y-2 flex-1">
+        <div
+          v-for="p in boardByStatus.notStarted"
+          :key="p.id"
+          class="rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2 text-xs space-y-1
+                 flex items-center justify-between gap-3
+                 dark:border-slate-800 dark:bg-slate-900/70
+                 hover:bg-slate-100/90 dark:hover:bg-slate-900 transition"
+        >
+          <div class="min-w-0">
+            <div class="font-medium truncate text-slate-900 dark:text-slate-50">
+              {{ p.title }}
+            </div>
+            <p class="text-[11px] text-slate-500 dark:text-slate-400">
+              {{ formatDateShort(p.dueAt) }}
+            </p>
+          </div>
+          <span
+            v-tooltip="statusBadge(p).label"
+            :class="badgeClass(statusBadge(p).variant)"
+          >
+            {{ statusBadge(p).label }}
+          </span>
+        </div>
+
+        <p
+          v-if="!boardByStatus.notStarted.length"
+          class="text-xs text-slate-400 dark:text-slate-500"
+        >
+          No tasks in this column.
+        </p>
+      </div>
+    </div>
+
+    <!-- IN PROGRESS -->
+    <div
+      class="rounded-2xl border border-slate-200/70 bg-white/80 backdrop-blur
+             dark:border-slate-800/80 dark:bg-slate-950/60 flex flex-col"
+    >
+      <div class="px-4 py-3 flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          In progress
+        </span>
+        <span class="text-xs text-slate-400 dark:text-slate-500">
+          {{ boardByStatus.inProgress.length }}
+        </span>
+      </div>
+
+      <div class="px-4 pb-4 space-y-2 flex-1">
+        <div
+          v-for="p in boardByStatus.inProgress"
+          :key="p.id"
+          class="rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2 text-xs space-y-1
+                 flex items-center justify-between gap-3
+                 dark:border-slate-800 dark:bg-slate-900/70
+                 hover:bg-slate-100/90 dark:hover:bg-slate-900 transition"
+        >
+          <div class="min-w-0">
+            <div class="font-medium truncate text-slate-900 dark:text-slate-50">
+              {{ p.title }}
+            </div>
+            <p class="text-[11px] text-slate-500 dark:text-slate-400">
+              {{ formatDateShort(p.dueAt) }}
+            </p>
+          </div>
+          <span
+            v-tooltip="statusBadge(p).label"
+            :class="badgeClass(statusBadge(p).variant)"
+          >
+            {{ statusBadge(p).label }}
+          </span>
+        </div>
+
+        <p
+          v-if="!boardByStatus.inProgress.length"
+          class="text-xs text-slate-400 dark:text-slate-500"
+        >
+          Nothing in progress.
+        </p>
+      </div>
+    </div>
+
+    <!-- DONE -->
+    <div
+      class="rounded-2xl border border-slate-200/70 bg-white/80 backdrop-blur
+             dark:border-slate-800/80 dark:bg-slate-950/60 flex flex-col"
+    >
+      <div class="px-4 py-3 flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Done
+        </span>
+        <span class="text-xs text-slate-400 dark:text-slate-500">
+          {{ boardByStatus.done.length }}
+        </span>
+      </div>
+
+      <div class="px-4 pb-4 space-y-2 flex-1">
+        <div
+          v-for="p in boardByStatus.done"
+          :key="p.id"
+          class="rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2 text-xs space-y-1
+                 flex items-center justify-between gap-3
+                 dark:border-slate-800 dark:bg-slate-900/70
+                 hover:bg-slate-100/90 dark:hover:bg-slate-900 transition"
+        >
+          <div class="min-w-0">
+            <div class="font-medium truncate text-slate-900 dark:text-slate-50">
+              {{ p.title }}
+            </div>
+            <p class="text-[11px] text-slate-500 dark:text-slate-400">
+              Done {{ formatDateShort(p.dueAt) }}
+            </p>
+          </div>
+          <span
+            v-tooltip="statusBadge(p).label"
+            :class="badgeClass(statusBadge(p).variant)"
+          >
+            {{ statusBadge(p).label }}
+          </span>
+        </div>
+
+        <p
+          v-if="!boardByStatus.done.length"
+          class="text-xs text-slate-400 dark:text-slate-500"
+        >
+          No completed tasks yet.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+
+
+
     <section class="mt-8">
     <Card>
       <div class="card-body space-y-4">

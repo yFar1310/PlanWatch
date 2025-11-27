@@ -43,52 +43,56 @@
         y: Math.random() * h,
         vx: (Math.random() - 0.5) * 40,
         vy: (Math.random() - 0.5) * 40,
-        r: 1 + Math.random(),
+        r: 1.2 + Math.random() * 1.1,
       })
     }
   }
   
   function draw() {
-    if (!ctx) return
-  
-    // fond sombre
-    ctx.fillStyle = '#020617'
-    ctx.fillRect(0, 0, w, h)
-  
-    // points
-    ctx.globalCompositeOperation = 'lighter'
-    ctx.fillStyle = '#e5e7eb'
-    for (const p of points) {
-      ctx.beginPath()
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-      ctx.fill()
-    }
-  
-    // lignes façon CodePen
+  if (!ctx) return
+
+  const isDark = document.documentElement.classList.contains('dark')
+
+  // fond
+  ctx.fillStyle = isDark ? '#020617' : '#e5e7eb' // gris clair en light
+  ctx.fillRect(0, 0, w, h)
+
+  // points
+  ctx.globalCompositeOperation = 'lighter'
+  ctx.fillStyle = isDark ? '#e5e7eb' : '#020617' // points noirs en light
+  for (const p of points) {
     ctx.beginPath()
-    for (let i = 0; i < points.length; i++) {
-      const a = points[i]
-  
-      // vers la souris
-      if (dist(a, mouse) < 150) {
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // lignes
+  ctx.beginPath()
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i]
+
+    if (dist(a, mouse) < 150) {
+      ctx.moveTo(a.x, a.y)
+      ctx.lineTo(mouse.x, mouse.y)
+    }
+
+    for (let j = i + 1; j < points.length; j++) {
+      const b = points[j]
+      if (dist(a, b) < 120) {
         ctx.moveTo(a.x, a.y)
-        ctx.lineTo(mouse.x, mouse.y)
-      }
-  
-      // entre points proches
-      for (let j = i + 1; j < points.length; j++) {
-        const b = points[j]
-        if (dist(a, b) < 120) {
-          ctx.moveTo(a.x, a.y)
-          ctx.lineTo(b.x, b.y)
-        }
+        ctx.lineTo(b.x, b.y)
       }
     }
-    ctx.lineWidth = 0.4
-    ctx.strokeStyle = 'rgba(148,163,184,0.55)'
-    ctx.stroke()
-    ctx.globalCompositeOperation = 'source-over'
   }
+  ctx.lineWidth = isDark ? 0.8 : 0.6
+  ctx.strokeStyle = isDark
+    ? 'rgba(148,163,184,0.95)'   // beaucoup plus visible en dark
+    : 'rgba(59,130,246,0.8)'     // plus vif en light   // bleu électrique en light (tailwind blue-500)
+  ctx.stroke()
+  ctx.globalCompositeOperation = 'source-over'
+}
+
+
   
   function update() {
     const fps = 60
