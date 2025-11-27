@@ -96,11 +96,47 @@ async function ensureSchema() {
     FROM (
       VALUES
         (
+          'Define project scope',
+          30::INT,
+          NULL::INT,
+          (now() - interval '3 days')::TIMESTAMPTZ,
+          'High-level objectives and constraints.'::TEXT,
+          ARRAY[]::INT[],
+          'active'::TEXT
+        ),
+        (
+          'Research existing tools',
+          45::INT,
+          NULL::INT,
+          (now() - interval '2 days')::TIMESTAMPTZ,
+          'Look at Notion, Linear, etc.'::TEXT,
+          ARRAY[]::INT[],
+          'active'::TEXT
+        ),
+        (
           'Prepare NoSQL report',
           120::INT,
           NULL::INT,
-          (now() + interval '1 day')::TIMESTAMPTZ,
+          (now() - interval '1 day')::TIMESTAMPTZ,
           'Outline sections and main ideas.'::TEXT,
+          ARRAY[]::INT[],
+          'active'::TEXT
+        ),
+        (
+          'Design PlanWatch data model',
+          60::INT,
+          NULL::INT,
+          (now())::TIMESTAMPTZ,
+          'Postgres schema + Mongo events.'::TEXT,
+          ARRAY[]::INT[],
+          'active'::TEXT
+        ),
+        (
+          'Implement backend API',
+          90::INT,
+          NULL::INT,
+          (now() + interval '1 day')::TIMESTAMPTZ,
+          'Hono routes, validation and CORS.'::TEXT,
           ARRAY[]::INT[],
           'active'::TEXT
         ),
@@ -114,11 +150,56 @@ async function ensureSchema() {
           'active'::TEXT
         ),
         (
+          'Implement dashboard cards',
+          50::INT,
+          NULL::INT,
+          (now() + interval '3 days')::TIMESTAMPTZ,
+          'Today / Upcoming / Activity.'::TEXT,
+          ARRAY[]::INT[],
+          'active'::TEXT
+        ),
+        (
+          'Implement tasks board',
+          70::INT,
+          NULL::INT,
+          (now() + interval '4 days')::TIMESTAMPTZ,
+          'Not started / In progress / Done.'::TEXT,
+          ARRAY[]::INT[],
+          'active'::TEXT
+        ),
+        (
           'Refactor dashboard UI',
           60::INT,
           NULL::INT,
-          (now() + interval '3 days')::TIMESTAMPTZ,
+          (now() + interval '5 days')::TIMESTAMPTZ,
           'Polish cards, colors and animations.'::TEXT,
+          ARRAY[]::INT[],
+          'active'::TEXT
+        ),
+        (
+          'Polish dark mode theme',
+          45::INT,
+          NULL::INT,
+          (now() + interval '6 days')::TIMESTAMPTZ,
+          'Fine-tune background and contrasts.'::TEXT,
+          ARRAY[]::INT[],
+          'active'::TEXT
+        ),
+        (
+          'Write project documentation',
+          80::INT,
+          NULL::INT,
+          (now() + interval '7 days')::TIMESTAMPTZ,
+          'README + technical notes.'::TEXT,
+          ARRAY[]::INT[],
+          'active'::TEXT
+        ),
+        (
+          'Final QA & presentation',
+          90::INT,
+          NULL::INT,
+          (now() + interval '8 days')::TIMESTAMPTZ,
+          'Manual tests + slides.'::TEXT,
           ARRAY[]::INT[],
           'active'::TEXT
         )
@@ -132,6 +213,51 @@ async function ensureSchema() {
       status
     )
     WHERE NOT EXISTS (SELECT 1 FROM plans);
+
+    -- Dépendances pour PERT (on les pose par titre, donc pas besoin de connaître les IDs)
+    UPDATE plans p
+    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Define project scope')]
+    WHERE p.title = 'Research existing tools';
+
+    UPDATE plans p
+    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Research existing tools')]
+    WHERE p.title = 'Prepare NoSQL report';
+
+    UPDATE plans p
+    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Prepare NoSQL report')]
+    WHERE p.title = 'Design PlanWatch data model';
+
+    UPDATE plans p
+    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Design PlanWatch data model')]
+    WHERE p.title = 'Implement backend API';
+
+    UPDATE plans p
+    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Implement backend API')]
+    WHERE p.title = 'Implement PlanWatch PERT';
+
+    UPDATE plans p
+    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Implement backend API')]
+    WHERE p.title = 'Implement dashboard cards';
+
+    UPDATE plans p
+    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Implement dashboard cards')]
+    WHERE p.title = 'Implement tasks board';
+
+    UPDATE plans p
+    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Implement tasks board')]
+    WHERE p.title = 'Refactor dashboard UI';
+
+    UPDATE plans p
+    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Refactor dashboard UI')]
+    WHERE p.title = 'Polish dark mode theme';
+
+    UPDATE plans p
+    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Polish dark mode theme')]
+    WHERE p.title = 'Write project documentation';
+
+    UPDATE plans p
+    SET depends_on = ARRAY[(SELECT id FROM plans WHERE title = 'Write project documentation')]
+    WHERE p.title = 'Final QA & presentation';
   `;
   await pool.query(seedSql);
 }

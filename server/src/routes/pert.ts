@@ -23,23 +23,47 @@ export default async function pertHandler(c: Context) {
       id,
       title,
       expected_minutes AS "duration",
-      depends_on       AS "dependsOn"
+      depends_on       AS "dependsOn",
+      due_at
     FROM plans
+    WHERE status = 'active'
+    ORDER BY due_at ASC
+    LIMIT 15
   `)
 
-  const nodes: Node[] = rows.map((r: any) => ({
-    id: Number(r.id),
-    title: r.title,
-    duration: Number(r.duration) || 0,
-    dependsOn: r.dependsOn != null ? Number(r.dependsOn) : null,
-  }))
+  const nodes: Node[] = rows
+    .map((r: any) => {
+      let dependsOn: number | null = null
+      const raw = r.dependsOn as unknown
 
-  if (!nodes.length) return c.json({ projectDuration: 0, tasks: [] })
+      if (Array.isArray(raw)) {
+        // '{}' => [], ignore; '{3}' => ['3']
+        if (raw.length > 0) {
+          const maybe = Number(raw[0])
+          dependsOn = Number.isFinite(maybe) ? maybe : null
+        }
+      } else if (raw != null) {
+        const maybe = Number(raw)
+        dependsOn = Number.isFinite(maybe) ? maybe : null
+      }
 
-  // maps
+      return {
+        id: Number(r.id),
+        title: r.title,
+        duration: Number(r.duration) || 0,
+        dependsOn,
+      }
+    })
+    .filter((n) => n.duration > 0)
+
+  if (!nodes.length) {
+    return c.json({ projectDuration: 0, tasks: [] })
+  }
+
+  // --- build graph
   const byId = new Map<number, Node>()
-  const preds = new Map<number, number[]>()  // prédécesseurs
-  const succs = new Map<number, number[]>()  // successeurs
+  const preds = new Map<number, number[]>()
+  const succs = new Map<number, number[]>()
   const indeg = new Map<number, number>()
 
   for (const n of nodes) {
@@ -49,7 +73,6 @@ export default async function pertHandler(c: Context) {
     indeg.set(n.id, 0)
   }
 
-  // construit graphe
   for (const n of nodes) {
     if (n.dependsOn != null && byId.has(n.dependsOn)) {
       preds.get(n.id)!.push(n.dependsOn)
@@ -58,7 +81,7 @@ export default async function pertHandler(c: Context) {
     }
   }
 
-  // tri topologique (Kahn)
+  // --- topological sort (Kahn)
   const queue: number[] = []
   for (const [id, d] of indeg.entries()) {
     if (d === 0) queue.push(id)
@@ -75,14 +98,17 @@ export default async function pertHandler(c: Context) {
   }
 
   if (topoOrder.length !== nodes.length) {
-    // cycle détecté
     return c.json(
-      { ok: false, error: 'cycle_detected', message: 'Dependency graph contains a cycle.' },
+      {
+        ok: false,
+        error: 'cycle_detected',
+        message: 'Dependency graph contains a cycle.',
+      },
       400,
     )
   }
 
-  // FORWARD PASS : ES / EF
+  // --- forward pass ES / EF
   const es = new Map<number, number>()
   const ef = new Map<number, number>()
 
@@ -102,7 +128,7 @@ export default async function pertHandler(c: Context) {
 
   const projectDuration = Math.max(...Array.from(ef.values()))
 
-  // BACKWARD PASS : LS / LF
+  // --- backward pass LS / LF
   const ls = new Map<number, number>()
   const lf = new Map<number, number>()
 
