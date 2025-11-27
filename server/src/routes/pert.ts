@@ -17,6 +17,31 @@ type PertTask = Node & {
   slack: number
 }
 
+// Parse propre de depends_on (INT[] PG -> premier id ou null)
+function parseDepends(raw: unknown): number | null {
+  if (raw == null) return null
+
+  // Cas tableau (pg peut déjà renvoyer un array)
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) return null
+    const n = Number(raw[0])
+    return Number.isFinite(n) && n > 0 ? n : null
+  }
+
+  // Cas string style '{1,2}' ou '{}'
+  if (typeof raw === 'string') {
+    const trimmed = raw.replace(/[{}]/g, '').trim()
+    if (!trimmed) return null
+    const first = trimmed.split(',')[0]
+    const n = Number(first)
+    return Number.isFinite(n) && n > 0 ? n : null
+  }
+
+  // Fallback: simple nombre
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
 export default async function pertHandler(c: Context) {
   const { rows } = await pool.query(`
     SELECT
@@ -31,34 +56,28 @@ export default async function pertHandler(c: Context) {
     LIMIT 15
   `)
 
-  const nodes: Node[] = rows
-    .map((r: any) => {
-      let dependsOn: number | null = null
-      const raw = r.dependsOn as unknown
-
-      if (Array.isArray(raw)) {
-        // '{}' => [], ignore; '{3}' => ['3']
-        if (raw.length > 0) {
-          const maybe = Number(raw[0])
-          dependsOn = Number.isFinite(maybe) ? maybe : null
-        }
-      } else if (raw != null) {
-        const maybe = Number(raw)
-        dependsOn = Number.isFinite(maybe) ? maybe : null
-      }
-
-      return {
-        id: Number(r.id),
-        title: r.title,
-        duration: Number(r.duration) || 0,
-        dependsOn,
-      }
-    })
+  // 1) mapping brut + filtrage duration > 0
+  const rawNodes: Node[] = rows
+    .map((r: any) => ({
+      id: Number(r.id),
+      title: r.title,
+      duration: Number(r.duration) || 0,
+      dependsOn: parseDepends(r.dependsOn),
+    }))
     .filter((n) => n.duration > 0)
 
-  if (!nodes.length) {
+  if (!rawNodes.length) {
     return c.json({ projectDuration: 0, tasks: [] })
   }
+
+  // 2) on ne garde que les deps qui pointent vers un id présent dans ce batch
+  const idSet = new Set(rawNodes.map((n) => n.id))
+
+  const nodes: Node[] = rawNodes.map((n) => ({
+    ...n,
+    dependsOn:
+      n.dependsOn != null && idSet.has(n.dependsOn) ? n.dependsOn : null,
+  }))
 
   // --- build graph
   const byId = new Map<number, Node>()
