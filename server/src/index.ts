@@ -60,6 +60,10 @@ async function ensureSchema() {
       note TEXT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    ALTER TABLE plans
+      ADD COLUMN IF NOT EXISTS depends_on INT[] NOT NULL DEFAULT ARRAY[]::INT[];
+
+    -- index utiles
     CREATE INDEX IF NOT EXISTS idx_plans_due_at ON plans (due_at);
     CREATE INDEX IF NOT EXISTS idx_plans_created_at ON plans (created_at);
   `;
