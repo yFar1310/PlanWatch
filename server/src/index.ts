@@ -125,6 +125,28 @@ async function ensureSchema() {
   `;
   await pool.query(sql);
 
+  // 🔥 One-shot reset flag (for Railway)
+  const shouldReset =
+    process.env.RESET_DB_ON_BOOT === '1' ||
+    process.env.RESET_DB_ON_BOOT === 'true';
+
+  if (shouldReset) {
+    console.log('[Boot] RESET_DB_ON_BOOT enabled → truncating tables…');
+
+    // PG: reset plans
+    await pool.query('TRUNCATE TABLE plans RESTART IDENTITY CASCADE;');
+
+    // Mongo: clear projections to stay in sync
+    try {
+      const db = await getMongoDb();
+      await db.collection('plans').deleteMany({});
+      await db.collection('events').deleteMany({});
+      console.log('[Boot] Mongo projections cleared');
+    } catch (e) {
+      console.error('[Boot] Failed to reset Mongo projections', e);
+    }
+  }
+
   // --- Seed user démo si absent -------------------------------------------
   const demoEmail = process.env.DEMO_EMAIL || 'demo@planwatch.test';
   const demoPassword = process.env.DEMO_PASSWORD || 'BIMBO@123';
@@ -143,6 +165,7 @@ async function ensureSchema() {
     console.log('[PG] Seeded demo user', demoEmail);
   }
 
+  // --- Seed plans (only if table is empty) --------------------------------
   const seedSql = `
     INSERT INTO plans (title, expected_minutes, actual_minutes, due_at, note, depends_on, status)
     SELECT
