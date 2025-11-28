@@ -90,10 +90,9 @@
             <td class="py-3 pr-0 text-right">
               <div class="inline-flex items-center gap-2">
                 <RouterLink
-                  :to="`/plans/${p.id}/edit`"
-                  class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-300/70 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800"
-                  aria-label="Edit"
-                >
+                :to="{ name: 'plans-edit', params: { id: p.id } }"
+                class="mr-3 underline underline-offset-2 hover:opacity-80"
+              >
                   <PenSquare class="h-4 w-4" />
                 </RouterLink>
                 <button

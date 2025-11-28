@@ -8,19 +8,24 @@ const patchSchema = z.object({
   title: z.string().trim().min(3).max(200).optional(),
   expectedMinutes: z.coerce.number().int().gt(0).optional(),
   actualMinutes: z.coerce.number().int().min(0).nullable().optional(),
-  dueAt: z.union([z.string(), z.date()]).transform((v) => {
-    if (v === undefined) return undefined
-    const d = typeof v === 'string' ? new Date(v) : v
-    if (Number.isNaN(d.getTime())) throw new Error('Invalid date')
-    return new Date(
-      Date.UTC(
-        d.getFullYear(), d.getMonth(), d.getDate(),
-        d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()
-      )
-    ).toISOString()
-  }).optional(),
+
+  // on accepte une string ISO, ou rien
+  dueAt: z.string().optional(),
+
   note: z.string().trim().max(500).nullable().optional(),
-  dependsOn: z.number().int().positive().nullable().optional(),
+
+  // 🔧 corrige ici
+  dependsOn: z
+    .preprocess((val) => {
+      if (val === null || val === undefined) return null
+      if (Array.isArray(val)) {
+        if (!val.length) return null
+        return val[0]
+      }
+      return val
+    }, z.coerce.number().int().positive().nullable())
+    .optional(),
+
   status: z.enum(['not_started', 'in_progress', 'done']).optional(),
 })
 
@@ -32,7 +37,22 @@ export default async function updatePlanHandler(c: Context) {
 
   try {
     const body = await c.req.json()
-    const p = patchSchema.parse(body)
+    const raw = patchSchema.parse(body)
+
+    const patch: typeof raw & { dueAt?: string } = { ...raw }
+
+    if (patch.dueAt !== undefined) {
+      const d = new Date(patch.dueAt)
+      if (Number.isNaN(d.getTime())) {
+        return c.json(
+          { ok: false, error: 'invalid_due_at', message: 'Invalid dueAt datetime' },
+          400
+        )
+      }
+
+      // on garde simplement l'instant tel quel, en ISO
+      patch.dueAt = d.toISOString()
+    }
 
     // état actuel
     const currentRes = await pool.query(
@@ -45,15 +65,24 @@ export default async function updatePlanHandler(c: Context) {
     const current = currentRes.rows[0]
 
     // valeurs effectives après patch
-    const effectiveDueAtIso: string = p.dueAt ?? current.due_at
+    const effectiveDueAtIso: string =
+      patch.dueAt ??
+      (current.due_at instanceof Date
+        ? current.due_at.toISOString()
+        : String(current.due_at))
+
     const effectiveDependsOn: number | null =
-      p.dependsOn !== undefined ? p.dependsOn : current.depends_on
+      patch.dependsOn !== undefined ? patch.dependsOn : current.depends_on
 
     // règle dépendance
     if (effectiveDependsOn != null) {
       if (effectiveDependsOn === id) {
         return c.json(
-          { ok: false, error: 'self_dependency', message: 'A plan cannot depend on itself.' },
+          {
+            ok: false,
+            error: 'self_dependency',
+            message: 'A plan cannot depend on itself.',
+          },
           400
         )
       }
@@ -64,7 +93,11 @@ export default async function updatePlanHandler(c: Context) {
       )
       if (!depRes.rows.length) {
         return c.json(
-          { ok: false, error: 'dependency_not_found', dependencyId: effectiveDependsOn },
+          {
+            ok: false,
+            error: 'dependency_not_found',
+            dependencyId: effectiveDependsOn,
+          },
           400
         )
       }
@@ -87,8 +120,8 @@ export default async function updatePlanHandler(c: Context) {
     }
 
     // auto-status si actualMinutes > 0
-    const patchWithStatus: any = { ...p }
-    if (p.actualMinutes != null && p.actualMinutes > 0 && !p.status) {
+    const patchWithStatus: any = { ...patch }
+    if (patch.actualMinutes != null && patch.actualMinutes > 0 && !patch.status) {
       patchWithStatus.status = 'done'
     }
 
@@ -99,6 +132,7 @@ export default async function updatePlanHandler(c: Context) {
 
     for (const [k, v] of Object.entries(patchWithStatus)) {
       if (v === undefined) continue
+
       const col = (
         {
           title: 'title',
@@ -108,8 +142,10 @@ export default async function updatePlanHandler(c: Context) {
           note: 'note',
           dependsOn: 'depends_on',
           status: 'status',
-        } as any
+        } as Record<string, string>
       )[k]
+
+      if (!col) continue // sécurité : au cas où
 
       fields.push(`${col} = $${i++}`)
       vals.push(v)
@@ -173,10 +209,18 @@ export default async function updatePlanHandler(c: Context) {
 
     return c.json({ ok: true, plan: planRow })
   } catch (e: any) {
+    // 🔍 beaucoup plus verbeux pour débug éventuel
+    console.error('updatePlan error', e)
     if (e instanceof ZodError) {
       return c.json({ ok: false, error: 'validation', issues: e.errors }, 400)
     }
-    console.error('updatePlan error', e)
-    return c.json({ ok: false, error: 'internal' }, 500)
+    return c.json(
+      {
+        ok: false,
+        error: 'internal',
+        message: e?.message ?? 'internal_error',
+      },
+      500
+    )
   }
 }

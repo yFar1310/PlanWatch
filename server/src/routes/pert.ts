@@ -17,18 +17,16 @@ type PertTask = Node & {
   slack: number
 }
 
-// Parse propre de depends_on (INT[] PG -> premier id ou null)
+// Helper commun : PG INT[] / string -> premier id ou null
 function parseDepends(raw: unknown): number | null {
   if (raw == null) return null
 
-  // Cas tableau (pg peut déjà renvoyer un array)
   if (Array.isArray(raw)) {
-    if (raw.length === 0) return null
+    if (!raw.length) return null
     const n = Number(raw[0])
     return Number.isFinite(n) && n > 0 ? n : null
   }
 
-  // Cas string style '{1,2}' ou '{}'
   if (typeof raw === 'string') {
     const trimmed = raw.replace(/[{}]/g, '').trim()
     if (!trimmed) return null
@@ -37,7 +35,6 @@ function parseDepends(raw: unknown): number | null {
     return Number.isFinite(n) && n > 0 ? n : null
   }
 
-  // Fallback: simple nombre
   const n = Number(raw)
   return Number.isFinite(n) && n > 0 ? n : null
 }
@@ -56,11 +53,10 @@ export default async function pertHandler(c: Context) {
     LIMIT 15
   `)
 
-  // 1) mapping brut + filtrage duration > 0
   const rawNodes: Node[] = rows
     .map((r: any) => ({
       id: Number(r.id),
-      title: r.title,
+      title: r.title as string,
       duration: Number(r.duration) || 0,
       dependsOn: parseDepends(r.dependsOn),
     }))
@@ -70,7 +66,7 @@ export default async function pertHandler(c: Context) {
     return c.json({ projectDuration: 0, tasks: [] })
   }
 
-  // 2) on ne garde que les deps qui pointent vers un id présent dans ce batch
+  // On ignore les deps vers des tâches hors du batch
   const idSet = new Set(rawNodes.map((n) => n.id))
 
   const nodes: Node[] = rawNodes.map((n) => ({

@@ -1,50 +1,121 @@
-import type { Plan, DashboardStats, ActivityEvent } from '../types'
+// web/src/lib/useApi.ts
+import type { Plan, DashboardStats, ActivityEvent } from '../types';
 
+const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000') as string;
 
-const BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000') as string
+type LoginResponse = {
+  ok: boolean;
+  token: string;
+  user: { id: number; email: string };
+};
 
+async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers || {});
 
-async function json(r: Response) {
-const j = await r.json()
-if (!r.ok) throw new Error(j?.message || r.statusText)
-return j
+  // JSON par défaut si body
+  if (options.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  // JWT si présent (sauf pour le login)
+  const token = localStorage.getItem('pw.token');
+  if (token && !path.startsWith('/api/auth/login')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const res = await fetch(`${BASE}${path}`, {
+    ...options,
+    headers,
+  });
+
+  // 401 -> on nettoie et on renvoie vers /login (sauf si déjà dessus)
+  if (res.status === 401) {
+    localStorage.removeItem('pw.token');
+    localStorage.removeItem('pw.user.email');
+    if (location.pathname !== '/login') {
+      location.href = '/login';
+    }
+  }
+
+  let data: any = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const msg =
+      data?.error ||
+      data?.message ||
+      `Request failed with status ${res.status}`;
+    throw new Error(msg);
+  }
+
+  return data as T;
 }
-
 
 export function useApi() {
-return {
-submitPlan(payload: Plan) {
-return fetch(`${BASE}/api/submit`, {
-method: 'POST', headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify(payload),
-}).then(json)
-},
-listPlans(params?: { from?: string; to?: string; limit?: number; offset?: number; order?: 'due_at'|'created_at'; dir?: 'asc'|'desc' }) {
-  const qs = params ? '?' + new URLSearchParams(params as any).toString() : '';
-  return fetch(`${BASE}/api/plans${qs}`).then(json);
-},
-getPlan(id: number) {
-  return fetch(`${BASE}/api/plans/${id}`).then(json)
-},
-updatePlan(id: number, patch: Partial<Plan>) {
-  return fetch(`${BASE}/api/plans/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type':'application/json' },
-    body: JSON.stringify(patch),
-  }).then(json)
-},
-deletePlan(id: number) {
-  return fetch(`${BASE}/api/plans/${id}`, { method: 'DELETE' }).then(json)
-},
-getStats() {
-  return fetch(`${BASE}/api/stats`).then(json) as Promise<DashboardStats>
-},
-listActivity(limit = 8) {
-  const qs = `?limit=${limit}`
-  return fetch(`${BASE}/api/activity${qs}`).then(json) as Promise<{ items: ActivityEvent[] }>
-},
-pert() {
-  return fetch(`${BASE}/api/pert`).then(json)
-},
-}
+  return {
+    // --- Auth ---------------------------------------------------------------
+    login(email: string, password: string) {
+      return request<LoginResponse>('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+    },
+
+    // --- Plans --------------------------------------------------------------
+    submitPlan(payload: Plan) {
+      return request<{ ok: boolean; plan: Plan }>('/api/submit', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+
+    listPlans(params?: {
+      from?: string;
+      to?: string;
+      limit?: number;
+      offset?: number;
+      order?: 'due_at' | 'created_at';
+      dir?: 'asc' | 'desc';
+    }) {
+      const qs = params
+        ? '?' + new URLSearchParams(params as any).toString()
+        : '';
+      return request<Plan[]>(`/api/plans${qs}`);
+    },
+
+    getPlan(id: number) {
+      return request<Plan>(`/api/plans/${id}`);
+    },
+
+    updatePlan(id: number, patch: Partial<Plan>) {
+      return request<{ ok: boolean; plan: Plan }>(`/api/plans/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      });
+    },
+
+    deletePlan(id: number) {
+      return request<{ ok: boolean }>(`/api/plans/${id}`, {
+        method: 'DELETE',
+      });
+    },
+
+    // --- Dashboard ---------------------------------------------------------
+    getStats() {
+      return request<DashboardStats>('/api/stats');
+    },
+
+    listActivity(limit = 8) {
+      const qs = `?limit=${limit}`;
+      return request<{ items: ActivityEvent[] }>(`/api/activity${qs}`);
+    },
+
+    pert() {
+      return request('/api/pert');
+    },
+  };
 }

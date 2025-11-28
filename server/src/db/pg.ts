@@ -1,24 +1,9 @@
 // server/src/db/pg.ts
-import pg from 'pg';                    // ✅ import default
-const { Pool } = pg;                    // ✅ destructure
+import pg from 'pg';
+
+const { Pool } = pg;
 
 export const pool = new Pool({
   connectionString: process.env.POSTGRES_URL,
-  // ssl: { rejectUnauthorized: false } // (si jamais tu passes en prod managée)
+  // ssl: { rejectUnauthorized: false } // en prod managée si besoin
 });
-
-export async function ensureSchema() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS plans (
-      id SERIAL PRIMARY KEY,
-      title TEXT NOT NULL,
-      expected_minutes INT CHECK (expected_minutes > 0),
-      actual_minutes INT CHECK (actual_minutes >= 0),
-      due_at TIMESTAMPTZ NOT NULL,
-      note TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      depends_on INT NULL REFERENCES plans(id) ON DELETE SET NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-  `);
-}

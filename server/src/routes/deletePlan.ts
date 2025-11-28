@@ -10,12 +10,12 @@ export default async function deletePlanHandler(c: Context) {
   }
 
   try {
-    // 1) Postgres : enlever ce plan des deps des autres
+    // 1) Postgres : enlever la dépendance (INT, plus INT[])
     await pool.query(
       `
       UPDATE plans
-      SET depends_on = array_remove(depends_on, $1)
-      WHERE $1 = ANY(depends_on)
+      SET depends_on = NULL
+      WHERE depends_on = $1
       `,
       [id],
     )

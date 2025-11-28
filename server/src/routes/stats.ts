@@ -1,28 +1,62 @@
+// server/src/routes/stats.ts
 import type { Context } from 'hono';
 import { pool } from '../db/pg.js';
 
 export default async function statsHandler(c: Context) {
-  const { rows } = await pool.query(`
-    SELECT
-      COALESCE(SUM(expected_minutes) FILTER (WHERE due_at::date = CURRENT_DATE), 0) AS today_expected,
-      COALESCE(SUM(actual_minutes)   FILTER (WHERE due_at::date = CURRENT_DATE), 0) AS today_actual,
-      COUNT(*)  FILTER (WHERE due_at::date = CURRENT_DATE)::int AS today_count,
-      COUNT(*) FILTER (
-      WHERE due_at >= now()
-        AND due_at < now() + interval '7 days'
-        AND array_length(depends_on, 1) > 0
-    ) AS "plansWithDependency"
-  FROM plans
-  WHERE status = 'active'
-`);
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        -- plans dus aujourd'hui
+        COUNT(*) FILTER (
+          WHERE due_at::date = CURRENT_DATE
+        ) AS "todayCount",
 
-  const row = rows[0] ?? {};
+        COALESCE(
+          SUM(expected_minutes) FILTER (
+            WHERE due_at::date = CURRENT_DATE
+          ),
+          0
+        ) AS "todayExpectedMinutes",
 
-  return c.json({
-    todayExpectedMinutes: Number(row.today_expected ?? 0),
-    todayActualMinutes:   Number(row.today_actual ?? 0),
-    todayCount:           Number(row.today_count ?? 0),
-    upcomingCount:        Number(row.upcoming_count ?? 0),
-    plansWithDependency:  Number(row.deps_count ?? 0),
-  });
+        COALESCE(
+          SUM(actual_minutes) FILTER (
+            WHERE due_at::date = CURRENT_DATE
+          ),
+          0
+        ) AS "todayActualMinutes",
+
+        -- plans dans les 7 prochains jours
+        COUNT(*) FILTER (
+          WHERE due_at >= NOW()
+            AND due_at < NOW() + INTERVAL '7 days'
+        ) AS "upcomingCount",
+
+        -- plans qui ont au moins UNE dépendance
+        COUNT(*) FILTER (
+          WHERE depends_on IS NOT NULL
+        ) AS "plansWithDependency"
+      FROM plans;
+    `);
+
+    const row =
+      rows[0] ?? {
+        todayCount: 0,
+        todayExpectedMinutes: 0,
+        todayActualMinutes: 0,
+        upcomingCount: 0,
+        plansWithDependency: 0,
+      };
+
+    return c.json(row);
+  } catch (e: any) {
+    console.error('stats error', e);
+    return c.json(
+      {
+        ok: false,
+        error: 'internal',
+        message: e?.message ?? 'stats_failed',
+      },
+      500,
+    );
+  }
 }

@@ -1,6 +1,6 @@
 export type PlanStatus = 'not_started' | 'in_progress' | 'done';
 export interface Plan {
-dependsOn: null
+dependsOn: null | number
 id?: string
 title: string
 expectedMinutes: number
