@@ -64,7 +64,7 @@
             class="border-t border-gray-100 dark:border-gray-800"
           >
             <td class="py-3 pr-4">{{ p.title }}</td>
-            <td class="py-3 pr-4">{{ p.expectedMinutes }} min</td>
+            <td class="py-3 pr-4">{{ formatMinutes(p.expectedMinutes) }}</td>
             <td class="py-3 pr-4">
               {{ new Date(p.dueAt).toLocaleString() }}
             </td>
@@ -164,8 +164,11 @@
         </header>
 
         <p class="text-xs text-gray-500 dark:text-gray-400">
-          Expected: <span class="font-medium">{{ p.expectedMinutes }} min</span>
-        </p>
+        Expected:
+        <span class="font-medium">
+          {{ formatMinutes(p.expectedMinutes) }}
+        </span>
+      </p>
 
         <p class="text-xs" v-if="getDependency(p)">
           <span class="text-gray-500 dark:text-gray-400">Depends on:</span>
@@ -201,7 +204,7 @@ import { useApi } from '../lib/useApi'
 import type { Plan } from '../types'
 import { RouterLink } from 'vue-router'
 import ConfirmModal from '../components/common/ConfirmModal.vue'
-
+import { formatMinutes } from '../lib/format';
 const api = useApi()
 const plans = ref<Plan[]>([])
 const loading = ref(true)

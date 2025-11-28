@@ -20,6 +20,7 @@ import pertHandler from './routes/pert.js';
 // LOGIN 
 import { loginHandler, meHandler } from './routes/auth.js';
 import { requireAuth } from './middlewares/auth.js';
+import activityExportHandler from './routes/activityExport.js';
 
 dotenv.config();
 
@@ -63,6 +64,8 @@ app.delete('/api/plans/:id', requireAuth, deletePlanHandler);
 
 app.get('/api/stats', requireAuth, statsHandler);
 app.get('/api/activity', requireAuth, activityHandler);
+app.get('/api/activity/export', requireAuth, activityExportHandler);
+
 app.get('/api/pert', requireAuth, pertHandler);
 
 // ---------------------------------------------------------------------------

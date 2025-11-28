@@ -117,5 +117,41 @@ export function useApi() {
     pert() {
       return request('/api/pert');
     },
+
+    // --- Activity export (PDF) ---------------------------------------------
+    async downloadActivityPdf() {
+      const path = '/api/activity/export';
+      const headers = new Headers();
+
+      const token = localStorage.getItem('pw.token');
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
+
+      const res = await fetch(`${BASE}${path}`, { headers });
+
+      if (res.status === 401) {
+        localStorage.removeItem('pw.token');
+        localStorage.removeItem('pw.user.email');
+        if (location.pathname !== '/login') {
+          location.href = '/login';
+        }
+        throw new Error('unauthorized');
+      }
+
+      if (!res.ok) {
+        throw new Error(`Request failed with status ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'planwatch-activity.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    },
   };
 }

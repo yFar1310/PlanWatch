@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { Timer, Calendar, Activity as ActivityIcon } from 'lucide-vue-next'
+import { Timer, Calendar, Activity as ActivityIcon, Download } from 'lucide-vue-next'
 import { onMounted, ref, computed } from 'vue'
 import { useApi } from '../lib/useApi'
+import { formatMinutes } from '../lib/format';
 import type { DashboardStats, ActivityEvent, Plan } from '../types'
 import PERTGraph  from '../components/PERT/PERTGraph.vue'; 
 import Card from '../components/ui/Card.vue';
@@ -33,6 +34,7 @@ const statsError = ref<string | null>(null)
 const events = ref<ActivityEvent[]>([])
 const eventsLoading = ref(true)
 const eventsError = ref<string | null>(null)
+const downloadingActivity = ref(false)
 
 // --- Plans for board (Postgres) ---
 const plans = ref<Plan[]>([])
@@ -74,6 +76,19 @@ function endOfWeek(d: Date) {
   s.setHours(23, 59, 59, 999)
   return s
 }
+
+async function handleDownloadActivity() {
+  if (!events.value.length) return
+  downloadingActivity.value = true
+  try {
+    await api.downloadActivityPdf()
+  } catch (e: any) {
+    eventsError.value = e?.message ?? 'Failed to download activity'
+  } finally {
+    downloadingActivity.value = false
+  }
+}
+
 
 // --- initial load ---
 onMounted(async () => {
@@ -258,19 +273,19 @@ function formatDateShort(iso: string) {
               <p class="mt-2">
                 Planned:
                 <span class="font-semibold">
-                  {{ stats.todayExpectedMinutes }} min
+                  {{ formatMinutes(stats.todayExpectedMinutes) }}
                 </span>
               </p>
               <p class="mt-1">
                 Actual:
                 <span class="font-semibold">
-                  {{ stats.todayActualMinutes ?? 0 }} min
+                  {{ formatMinutes(stats.todayActualMinutes ?? 0) }}
                 </span>
               </p>
               <p v-if="todayDelta !== 0" class="mt-1 text-xs">
                 Delta:
                 <span :class="todayDelta > 0 ? 'text-emerald-400' : 'text-amber-400'">
-                  {{ todayDelta > 0 ? '+' : '' }}{{ todayDelta }} min
+                  {{ todayDelta > 0 ? '+' : '' }}{{ formatMinutes(Math.abs(todayDelta)) }}
                 </span>
               </p>
             </div>
@@ -314,9 +329,23 @@ function formatDateShort(iso: string) {
       <!-- Recent activity (Mongo) -->
       <section class="card sm:col-span-2 lg:col-span-1">
         <div class="card-body">
-          <div class="flex items-center gap-3">
-            <ActivityIcon class="h-5 w-5 text-brand" />
-            <h2 class="font-semibold">Recent activity</h2>
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <ActivityIcon class="h-5 w-5 text-brand" />
+              <h2 class="font-semibold text-sm">Recent activity</h2>
+            </div>
+
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-lg border border-slate-700/60
+                    px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800
+                    disabled:opacity-50 disabled:cursor-not-allowed"
+              :disabled="eventsLoading || !events.length || downloadingActivity"
+              @click="handleDownloadActivity"
+            >
+              <Download class="h-3 w-3" />
+              <span>{{ downloadingActivity ? 'Preparing…' : 'Download' }}</span>
+            </button>
           </div>
 
           <div class="mt-4">
@@ -553,7 +582,7 @@ function formatDateShort(iso: string) {
           <p v-if="!pertLoading && !pertError" class="text-xs text-slate-400">
             Project duration:
             <span class="font-mono">
-              {{ pertProjectDuration }} min
+              {{ formatMinutes(pertProjectDuration) }}
             </span>
           </p>
         </div>
