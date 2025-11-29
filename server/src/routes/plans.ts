@@ -1,46 +1,58 @@
+// server/src/routes/plans.ts
 import type { Context } from 'hono';
-import { z } from 'zod';
 import { pool } from '../db/pg.js';
-
-const qSchema = z.object({
-  // filtres/pagination optionnels
-  from: z.string().datetime().optional(),      // ISO
-  to: z.string().datetime().optional(),        // ISO
-  limit: z.coerce.number().int().min(1).max(200).default(50),
-  offset: z.coerce.number().int().min(0).default(0),
-  order: z.enum(['due_at', 'created_at']).default('due_at'),
-  dir: z.enum(['asc', 'desc']).default('asc'),
-});
+import type { JWTPayload } from '../middlewares/auth.js';
 
 export default async function listPlansHandler(c: Context) {
-  const qp = qSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
+  const auth = c.get('user') as JWTPayload | undefined;
+  if (!auth) {
+    return c.json({ error: 'unauthorized' }, 401);
+  }
 
-  const where: string[] = [];
-  const vals: any[] = [];
-  let i = 1;
+  const url = new URL(c.req.url);
+  const from = url.searchParams.get('from');
+  const to = url.searchParams.get('to');
+  const limit = Number(url.searchParams.get('limit') ?? '200');
+  const offset = Number(url.searchParams.get('offset') ?? '0');
+  const order = url.searchParams.get('order') === 'created_at' ? 'created_at' : 'due_at';
+  const dir = url.searchParams.get('dir') === 'desc' ? 'DESC' : 'ASC';
 
-  if (qp.from) { where.push(`due_at >= $${i++}`); vals.push(new Date(qp.from).toISOString()); }
-  if (qp.to)   { where.push(`due_at <  $${i++}`); vals.push(new Date(qp.to).toISOString()); }
+  const where: string[] = ['user_id = $1'];
+  const params: any[] = [auth.userId];
+  let idx = 2;
+
+  if (from) {
+    where.push(`due_at >= $${idx++}`);
+    params.push(new Date(from));
+  }
+  if (to) {
+    where.push(`due_at <= $${idx++}`);
+    params.push(new Date(to));
+  }
 
   const sql = `
     SELECT
       id,
       title,
-      expected_minutes   AS "expectedMinutes",
-      actual_minutes     AS "actualMinutes",
-      due_at             AS "dueAt",
+      expected_minutes AS "expectedMinutes",
+      actual_minutes   AS "actualMinutes",
+      due_at           AS "dueAt",
       note,
-      depends_on         AS "dependsOn",
-      created_at         AS "createdAt",
-      status
+      depends_on       AS "dependsOn",
+      status,
+      created_at       AS "createdAt",
+      project_id       AS "projectId",
+      priority,
+      recurrence_rule  AS "recurrenceRule"
     FROM plans
-    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY ${qp.order} ${qp.dir}
-    LIMIT $${i++} OFFSET $${i++}
+    WHERE ${where.join(' AND ')}
+    ORDER BY ${order} ${dir}
+    LIMIT $${idx++}
+    OFFSET $${idx++}
   `;
+  params.push(limit, offset);
 
-  vals.push(qp.limit, qp.offset);
+  const { rows } = await pool.query(sql, params);
 
-  const { rows } = await pool.query(sql, vals);
-  return c.json(rows);
+  return c.json({ items: rows });
 }

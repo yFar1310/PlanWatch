@@ -224,8 +224,8 @@ async function doDelete() {
 async function load() {
   loading.value = true
   try {
-    const r = await api.listPlans()
-    plans.value = Array.isArray(r.items) ? r.items : r
+    const r = await api.listPlans({ order: 'due_at', dir: 'desc' })
+    plans.value = r.items
   } finally {
     loading.value = false
   }

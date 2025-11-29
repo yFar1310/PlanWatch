@@ -28,6 +28,67 @@
         </Field>
       </div>
 
+      <div class="grid gap-4 sm:grid-cols-2">
+        <Field label="Status">
+          <div class="inline-flex w-full rounded-xl bg-slate-100 p-1 text-xs
+                      dark:bg-slate-900/70">
+            <button
+              v-for="opt in [
+                { value: 'not_started', label: 'Not started' },
+                { value: 'in_progress', label: 'In progress' },
+                { value: 'done', label: 'Done' },
+              ]"
+              :key="opt.value"
+              type="button"
+              class="flex-1 rounded-lg px-2 py-1"
+              :class="form.status === opt.value
+                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                : 'text-slate-500 dark:text-slate-400'"
+              @click="form.status = opt.value as PlanStatus"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+        </Field>
+
+          <Field label="Priority">
+            <div class="inline-flex w-full rounded-xl bg-slate-100 p-1 text-xs
+                        dark:bg-slate-900/70">
+              <button
+                type="button"
+                class="flex-1 rounded-lg px-2 py-1"
+                :class="form.priority <= -1
+                  ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                  : 'text-slate-500 dark:text-slate-400'"
+                @click="form.priority = -1"
+              >
+                Low
+              </button>
+              <button
+                type="button"
+                class="flex-1 rounded-lg px-2 py-1"
+                :class="form.priority === 0
+                  ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                  : 'text-slate-500 dark:text-slate-400'"
+                @click="form.priority = 0"
+              >
+                Normal
+              </button>
+              <button
+                type="button"
+                class="flex-1 rounded-lg px-2 py-1"
+                :class="form.priority >= 2
+                  ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                  : 'text-slate-500 dark:text-slate-400'"
+                @click="form.priority = 2"
+              >
+                High
+              </button>
+            </div>
+          </Field>
+        </div>
+
+
       <Field label="Due at">
         <DatePicker
           v-model="form.dueAt"
@@ -103,7 +164,7 @@ import '@vuepic/vue-datepicker/dist/main.css'
 import Modal from '../components/common/Modal.vue'
 import { CheckCircle } from 'lucide-vue-next'
 import { useApi } from '../lib/useApi'
-import type { Plan } from '../types'
+import type { Plan, PlanStatus } from '../types'
 
 const route = useRoute()
 const router = useRouter()
@@ -122,7 +183,9 @@ const form = reactive({
   dueAt: null as Date | null,
   note: '',
   dependsOn: null as number | null,
-})
+  status: 'not_started' as PlanStatus,
+  priority: 0 as number,
+});
 
 const allPlans = ref<Plan[]>([])
 
@@ -157,6 +220,8 @@ onMounted(async () => {
     form.dueAt = plan.dueAt ? new Date(plan.dueAt) : null
     form.note = plan.note ?? ''
     form.dependsOn = (plan.dependsOn ?? null) as number | null
+    form.status = (plan.status as PlanStatus) ?? 'not_started';
+    form.priority = plan.priority ?? 0;
   } catch (e: any) {
     error.value = e?.message ?? String(e)
   } finally {
@@ -184,6 +249,8 @@ async function save() {
       dueAt: form.dueAt ? (form.dueAt as Date).toISOString() : undefined,
       note: form.note?.trim() || undefined,
       dependsOn: form.dependsOn ?? null,
+      status: form.status,
+      priority: form.priority,
     }
     await api.updatePlan(id, patch)
     showSaved.value = true

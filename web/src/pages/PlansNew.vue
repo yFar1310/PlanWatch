@@ -39,6 +39,66 @@
           />
         </Field>
       </div>
+      
+      <div class="grid gap-4 sm:grid-cols-2">
+        <Field label="Status">
+          <div class="inline-flex w-full rounded-xl bg-slate-100 p-1 text-xs
+                      dark:bg-slate-900/70">
+            <button
+              v-for="opt in [
+                { value: 'not_started', label: 'Not started' },
+                { value: 'in_progress', label: 'In progress' },
+                { value: 'done', label: 'Done' },
+              ]"
+              :key="opt.value"
+              type="button"
+              class="flex-1 rounded-lg px-2 py-1"
+              :class="form.status === opt.value
+                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                : 'text-slate-500 dark:text-slate-400'"
+              @click="form.status = opt.value as PlanStatus"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+        </Field>
+
+          <Field label="Priority">
+            <div class="inline-flex w-full rounded-xl bg-slate-100 p-1 text-xs
+                        dark:bg-slate-900/70">
+              <button
+                type="button"
+                class="flex-1 rounded-lg px-2 py-1"
+                :class="form.priority <= -1
+                  ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                  : 'text-slate-500 dark:text-slate-400'"
+                @click="form.priority = -1"
+              >
+                Low
+              </button>
+              <button
+                type="button"
+                class="flex-1 rounded-lg px-2 py-1"
+                :class="form.priority === 0
+                  ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                  : 'text-slate-500 dark:text-slate-400'"
+                @click="form.priority = 0"
+              >
+                Normal
+              </button>
+              <button
+                type="button"
+                class="flex-1 rounded-lg px-2 py-1"
+                :class="form.priority >= 2
+                  ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                  : 'text-slate-500 dark:text-slate-400'"
+                @click="form.priority = 2"
+              >
+                High
+              </button>
+            </div>
+          </Field>
+        </div>
 
       <Field label="Depends on (optional)">
         <select
@@ -155,7 +215,7 @@ import { Send, CheckCircle } from 'lucide-vue-next'
 import Modal from '../components/common/Modal.vue'
 import AlertMessage from '../components/common/AlertMessage.vue'
 import { useApi } from '../lib/useApi'
-import type { Plan } from '../types'
+import type { Plan, PlanStatus } from '../types'
 
 const api = useApi()
 const router = useRouter()
@@ -167,7 +227,9 @@ const form = reactive({
   dueAt: null as Date | null,
   note: '',
   dependsOn: null as number | null,
-})
+  status: 'not_started' as PlanStatus,
+  priority: 0 as number,
+});
 
 const loading = ref(false)
 const response = ref<string | null>(null)
@@ -223,17 +285,16 @@ async function submit() {
   loading.value = true
   try {
     const payload: Plan = {
-      title: form.title.trim(),
-      expectedMinutes: Number(form.expectedMinutes),
-      actualMinutes:
-        form.actualMinutes === undefined
-          ? undefined
-          : Number(form.actualMinutes),
-      // 👉 plus de toIsoUtc, juste l'instant en ISO
-      dueAt: (form.dueAt as Date).toISOString(),
-      note: form.note?.trim() || undefined,
-      dependsOn: form.dependsOn ?? null,
-    }
+          title: form.title.trim(),
+          expectedMinutes: Number(form.expectedMinutes),
+          actualMinutes:
+            form.actualMinutes === undefined ? undefined : Number(form.actualMinutes),
+          dueAt: (form.dueAt as Date).toISOString(),
+          note: form.note?.trim() || undefined,
+          dependsOn: form.dependsOn ?? null,
+          status: form.status,
+          priority: form.priority,
+        };
 
     const j = await api.submitPlan(payload)
     response.value = JSON.stringify(j, null, 2)
@@ -245,6 +306,8 @@ async function submit() {
     form.dueAt = null
     form.note = ''
     form.dependsOn = null
+    form.status = 'not_started';
+    form.priority = 0;
 
     showSuccess.value = true
   } catch (e: any) {

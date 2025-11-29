@@ -1,15 +1,23 @@
+// web/src/types.ts
 export type PlanStatus = 'not_started' | 'in_progress' | 'done';
+
 export interface Plan {
-dependsOn: null | number
-id?: string
-title: string
-expectedMinutes: number
-actualMinutes?: number
-dueAt: string // ISO
-note?: string
-createdAt?: string,
-status: PlanStatus,
+  id?: number;
+  title: string;
+  expectedMinutes: number;
+  actualMinutes?: number | null;
+  dueAt: string;                 // ISO
+  note?: string | null;
+  dependsOn?: number | null;
+  createdAt?: string;
+
+  status?: PlanStatus;
+  userId?: number;
+  projectId?: number | null;
+  priority?: number | null;      // -5 .. 5
+  recurrenceRule?: string | null;
 }
+
 
 export interface DashboardStats {
     todayExpectedMinutes: number;
@@ -26,3 +34,10 @@ export interface DashboardStats {
     planId: number | null;
     dependsOn?: number | null;
   }
+
+  export interface User {
+  id: number;
+  email: string;
+  fullName?: string | null;
+  avatarData?: string | null;
+}

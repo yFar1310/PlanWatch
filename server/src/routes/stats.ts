@@ -1,12 +1,18 @@
 // server/src/routes/stats.ts
 import type { Context } from 'hono';
 import { pool } from '../db/pg.js';
+import type { JWTPayload } from '../middlewares/auth.js';
 
 export default async function statsHandler(c: Context) {
   try {
-    const { rows } = await pool.query(`
+    const user = c.get('user') as JWTPayload | undefined;
+    if (!user) {
+      return c.json({ ok: false, error: 'unauthorized' }, 401);
+    }
+
+    const { rows } = await pool.query(
+      `
       SELECT
-        -- plans dus aujourd'hui
         COUNT(*) FILTER (
           WHERE due_at::date = CURRENT_DATE
         ) AS "todayCount",
@@ -25,18 +31,19 @@ export default async function statsHandler(c: Context) {
           0
         ) AS "todayActualMinutes",
 
-        -- plans dans les 7 prochains jours
         COUNT(*) FILTER (
           WHERE due_at >= NOW()
             AND due_at < NOW() + INTERVAL '7 days'
         ) AS "upcomingCount",
 
-        -- plans qui ont au moins UNE dépendance
         COUNT(*) FILTER (
           WHERE depends_on IS NOT NULL
         ) AS "plansWithDependency"
-      FROM plans;
-    `);
+      FROM plans
+      WHERE (user_id = $1 OR user_id IS NULL)
+      `,
+      [user.userId],
+    );
 
     const row =
       rows[0] ?? {

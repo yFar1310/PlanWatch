@@ -66,7 +66,7 @@
     ctx.fill()
   }
 
-  // lignes
+  // lines
   ctx.beginPath()
   for (let i = 0; i < points.length; i++) {
     const a = points[i]
@@ -86,8 +86,8 @@
   }
   ctx.lineWidth = isDark ? 0.8 : 0.6
   ctx.strokeStyle = isDark
-    ? 'rgba(148,163,184,0.95)'   // beaucoup plus visible en dark
-    : 'rgba(59,130,246,0.8)'     // plus vif en light   // bleu électrique en light (tailwind blue-500)
+    ? 'rgba(148,163,184,0.95)'   
+    : 'rgba(59,130,246,0.8)'     
   ctx.stroke()
   ctx.globalCompositeOperation = 'source-over'
 }

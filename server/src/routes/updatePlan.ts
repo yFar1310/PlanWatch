@@ -1,226 +1,216 @@
-// server/src/routes/update-plan.ts
-import type { Context } from 'hono'
-import { z, ZodError } from 'zod'
-import { pool } from '../db/pg.js'
-import { getMongoDb } from '../db/mongo.js'
+// server/src/routes/updatePlan.ts
+import type { Context } from 'hono';
+import { z, ZodError } from 'zod';
+import { pool } from '../db/pg.js';
+import { getMongoDb } from '../db/mongo.js';
+import type { JWTPayload } from '../middlewares/auth.js';
 
-const patchSchema = z.object({
+const bodySchema = z.object({
   title: z.string().trim().min(3).max(200).optional(),
   expectedMinutes: z.coerce.number().int().gt(0).optional(),
   actualMinutes: z.coerce.number().int().min(0).nullable().optional(),
-
-  // on accepte une string ISO, ou rien
   dueAt: z.string().optional(),
-
   note: z.string().trim().max(500).nullable().optional(),
-
-  // 🔧 corrige ici
   dependsOn: z
     .preprocess((val) => {
-      if (val === null || val === undefined) return null
+      if (val === null || val === undefined) return null;
       if (Array.isArray(val)) {
-        if (!val.length) return null
-        return val[0]
+        if (!val.length) return null;
+        return val[0];
       }
-      return val
+      return val;
     }, z.coerce.number().int().positive().nullable())
     .optional(),
-
   status: z.enum(['not_started', 'in_progress', 'done']).optional(),
-})
+  projectId: z.coerce.number().int().positive().nullable().optional(),
+  priority: z.coerce.number().int().min(-5).max(5).optional(),
+  recurrenceRule: z.string().trim().max(500).nullable().optional(),
+});
 
 export default async function updatePlanHandler(c: Context) {
-  const id = Number(c.req.param('id'))
-  if (!Number.isInteger(id) || id <= 0) {
-    return c.json({ ok: false, error: 'bad_id' }, 400)
+  const auth = c.get('user') as JWTPayload | undefined;
+  if (!auth) return c.json({ error: 'unauthorized' }, 401);
+
+  const id = Number(c.req.param('id'));
+  if (!Number.isFinite(id)) return c.json({ error: 'invalid_id' }, 400);
+
+  if (!c.req.header('content-type')?.includes('application/json')) {
+    return c.json({ ok: false, error: 'unsupported_media_type' }, 415);
   }
 
+  let client: import('pg').PoolClient | null = null;
+
   try {
-    const body = await c.req.json()
-    const raw = patchSchema.parse(body)
+    const json = await c.req.json();
+    const parsed = bodySchema.parse(json);
 
-    const patch: typeof raw & { dueAt?: string } = { ...raw }
-
-    if (patch.dueAt !== undefined) {
-      const d = new Date(patch.dueAt)
-      if (Number.isNaN(d.getTime())) {
-        return c.json(
-          { ok: false, error: 'invalid_due_at', message: 'Invalid dueAt datetime' },
-          400
-        )
-      }
-
-      // on garde simplement l'instant tel quel, en ISO
-      patch.dueAt = d.toISOString()
+    // récupérer le plan existant (et vérifier le user)
+    const { rows: existingRows } = await pool.query(
+      'SELECT * FROM plans WHERE id = $1 AND user_id = $2',
+      [id, auth.userId],
+    );
+    if (!existingRows.length) {
+      return c.json({ ok: false, error: 'not_found' }, 404);
     }
+    const existing = existingRows[0];
 
-    // état actuel
-    const currentRes = await pool.query(
-      'SELECT id, due_at, depends_on, status FROM plans WHERE id = $1',
-      [id]
-    )
-    if (!currentRes.rows.length) {
-      return c.json({ ok: false, error: 'not_found' }, 404)
-    }
-    const current = currentRes.rows[0]
+    const dueAtIso = parsed.dueAt
+      ? new Date(parsed.dueAt).toISOString()
+      : existing.due_at.toISOString?.() ?? existing.due_at;
 
-    // valeurs effectives après patch
-    const effectiveDueAtIso: string =
-      patch.dueAt ??
-      (current.due_at instanceof Date
-        ? current.due_at.toISOString()
-        : String(current.due_at))
+    const effectiveDependsOn =
+      parsed.dependsOn === undefined ? existing.depends_on : parsed.dependsOn;
 
-    const effectiveDependsOn: number | null =
-      patch.dependsOn !== undefined ? patch.dependsOn : current.depends_on
+    const effectiveStatus =
+      parsed.status ??
+      (parsed.actualMinutes != null && parsed.actualMinutes > 0
+        ? 'done'
+        : existing.status);
 
-    // règle dépendance
+    const effectiveProjectId =
+      parsed.projectId === undefined ? existing.project_id : parsed.projectId;
+
+    const effectivePriority =
+      parsed.priority === undefined ? existing.priority : parsed.priority;
+
+    const effectiveRecurrenceRule =
+      parsed.recurrenceRule === undefined
+        ? existing.recurrence_rule
+        : parsed.recurrenceRule;
+
+    // check dépendance dans les plans du user
     if (effectiveDependsOn != null) {
-      if (effectiveDependsOn === id) {
+      const { rows: depRows } = await pool.query(
+        'SELECT id, title, due_at FROM plans WHERE id = $1 AND user_id = $2',
+        [effectiveDependsOn, auth.userId],
+      );
+      if (!depRows.length) {
         return c.json(
-          {
-            ok: false,
-            error: 'self_dependency',
-            message: 'A plan cannot depend on itself.',
-          },
-          400
-        )
+          { ok: false, error: 'dependency_not_found', dependencyId: effectiveDependsOn },
+          400,
+        );
       }
 
-      const depRes = await pool.query(
-        'SELECT id, title, due_at FROM plans WHERE id = $1',
-        [effectiveDependsOn]
-      )
-      if (!depRes.rows.length) {
-        return c.json(
-          {
-            ok: false,
-            error: 'dependency_not_found',
-            dependencyId: effectiveDependsOn,
-          },
-          400
-        )
-      }
-
-      const dep = depRes.rows[0]
-      const depDue = new Date(dep.due_at)
-      const thisDue = new Date(effectiveDueAtIso)
-
-      if (thisDue < depDue) {
+      const dep = depRows[0];
+      if (new Date(dueAtIso) < new Date(dep.due_at)) {
         return c.json(
           {
             ok: false,
             error: 'invalid_dependency_due_at',
             message: `Due date must be after or equal to dependency "${dep.title}".`,
-            dependencyDueAt: depDue.toISOString(),
+            dependencyDueAt: new Date(dep.due_at).toISOString(),
           },
-          400
-        )
+          400,
+        );
       }
     }
 
-    // auto-status si actualMinutes > 0
-    const patchWithStatus: any = { ...patch }
-    if (patch.actualMinutes != null && patch.actualMinutes > 0 && !patch.status) {
-      patchWithStatus.status = 'done'
-    }
+    client = await pool.connect();
+    await client.query('BEGIN');
 
-    // UPDATE dynamique
-    const fields: string[] = []
-    const vals: any[] = []
-    let i = 1
+    const sql = `
+      UPDATE plans
+      SET
+        title = COALESCE($1, title),
+        expected_minutes = COALESCE($2, expected_minutes),
+        actual_minutes   = COALESCE($3, actual_minutes),
+        due_at           = COALESCE($4, due_at),
+        note             = COALESCE($5, note),
+        depends_on       = $6,
+        status           = COALESCE($7, status),
+        project_id       = $8,
+        priority         = $9,
+        recurrence_rule  = $10
+      WHERE id = $11 AND user_id = $12
+      RETURNING
+        id,
+        title,
+        expected_minutes AS "expectedMinutes",
+        actual_minutes   AS "actualMinutes",
+        due_at           AS "dueAt",
+        note,
+        depends_on       AS "dependsOn",
+        status,
+        created_at       AS "createdAt",
+        project_id       AS "projectId",
+        priority,
+        recurrence_rule  AS "recurrenceRule"
+    `;
 
-    for (const [k, v] of Object.entries(patchWithStatus)) {
-      if (v === undefined) continue
+    const values = [
+      parsed.title ?? null,
+      parsed.expectedMinutes ?? null,
+      parsed.actualMinutes ?? null,
+      dueAtIso,
+      parsed.note ?? null,
+      effectiveDependsOn,
+      effectiveStatus,
+      effectiveProjectId,
+      effectivePriority,
+      effectiveRecurrenceRule,
+      id,
+      auth.userId,
+    ];
 
-      const col = (
-        {
-          title: 'title',
-          expectedMinutes: 'expected_minutes',
-          actualMinutes: 'actual_minutes',
-          dueAt: 'due_at',
-          note: 'note',
-          dependsOn: 'depends_on',
-          status: 'status',
-        } as Record<string, string>
-      )[k]
-
-      if (!col) continue // sécurité : au cas où
-
-      fields.push(`${col} = $${i++}`)
-      vals.push(v)
-    }
-
-    if (!fields.length) {
-      return c.json({ ok: false, error: 'empty_patch' }, 400)
-    }
-
-    vals.push(id)
-
-    const { rows } = await pool.query(
-      `UPDATE plans
-       SET ${fields.join(', ')}
-       WHERE id = $${i}
-       RETURNING
-         id,
-         title,
-         expected_minutes AS "expectedMinutes",
-         actual_minutes   AS "actualMinutes",
-         due_at           AS "dueAt",
-         note,
-         depends_on       AS "dependsOn",
-         status,
-         created_at       AS "createdAt"`,
-      vals
-    )
-
+    const { rows } = await client.query(sql, values);
     if (!rows.length) {
-      return c.json({ ok: false, error: 'not_found' }, 404)
+      await client.query('ROLLBACK');
+      return c.json({ ok: false, error: 'not_found_after_update' }, 404);
     }
+    const plan = rows[0];
 
-    const planRow = rows[0]
+    const db = await getMongoDb();
 
-    // Mongo "plans"
-    const db = await getMongoDb()
-    await db.collection('plans').updateOne(
-      { pgId: planRow.id },
-      {
-        $set: {
-          title: planRow.title,
-          expectedMinutes: planRow.expectedMinutes,
-          actualMinutes: planRow.actualMinutes,
-          dueAt: planRow.dueAt,
-          note: planRow.note,
-          dependsOn: planRow.dependsOn ?? null,
-          status: planRow.status,
-          updatedAt: new Date(),
-        },
-      },
-      { upsert: true }
-    )
-
-    // Mongo event
     await db.collection('events').insertOne({
       type: 'plan_updated',
       at: new Date(),
-      planId: planRow.id,
-      patch: patchWithStatus,
-    })
-
-    return c.json({ ok: true, plan: planRow })
-  } catch (e: any) {
-    // 🔍 beaucoup plus verbeux pour débug éventuel
-    console.error('updatePlan error', e)
-    if (e instanceof ZodError) {
-      return c.json({ ok: false, error: 'validation', issues: e.errors }, 400)
-    }
-    return c.json(
-      {
-        ok: false,
-        error: 'internal',
-        message: e?.message ?? 'internal_error',
+      userId: auth.userId,
+      planId: plan.id,
+      dependsOn: effectiveDependsOn,
+      payload: {
+        ...parsed,
+        dueAt: dueAtIso,
+        status: effectiveStatus,
+        projectId: effectiveProjectId,
+        priority: effectivePriority,
+        recurrenceRule: effectiveRecurrenceRule,
       },
-      500
-    )
+    });
+
+    await db.collection('plans').updateOne(
+      { pgId: plan.id, userId: auth.userId },
+      {
+        $set: {
+          title: plan.title,
+          expectedMinutes: plan.expectedMinutes,
+          actualMinutes: plan.actualMinutes,
+          dueAt: plan.dueAt,
+          note: plan.note,
+          dependsOn: plan.dependsOn ?? null,
+          status: plan.status,
+          projectId: effectiveProjectId,
+          priority: effectivePriority,
+          recurrenceRule: effectiveRecurrenceRule,
+          updatedAt: new Date(),
+        },
+      },
+      { upsert: true },
+    );
+
+    await client.query('COMMIT');
+    return c.json({ ok: true, plan });
+  } catch (err: any) {
+    try {
+      if (client) await client.query('ROLLBACK');
+    } catch {}
+    if (err instanceof ZodError) {
+      return c.json({ ok: false, error: 'validation', issues: err.errors }, 400);
+    }
+    console.error('updatePlan error', err);
+    return c.json({ ok: false, error: 'internal' }, 500);
+  } finally {
+    try {
+      if (client) client.release();
+    } catch {}
   }
 }

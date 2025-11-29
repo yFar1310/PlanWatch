@@ -1,86 +1,104 @@
+<!-- web/src/pages/Login.vue -->
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { useApi } from '../lib/useApi'
+import { reactive, ref } from 'vue';
+import { useRouter, RouterLink } from 'vue-router';
+import Card from '../components/ui/Card.vue';
+import Field from '../components/ui/Field.vue';
+import Input from '../components/ui/Input.vue';
+import Button from '../components/ui/Button.vue';
+import AlertMessage from '../components/common/AlertMessage.vue';
+import { useApi } from '../lib/useApi';
 
-const api = useApi()
-const route = useRoute()
-const router = useRouter()
+const api = useApi();
+const router = useRouter();
 
-const email = ref('demo@planwatch.test')
-const password = ref('')
-const loading = ref(false)
-const error = ref<string | null>(null)
+const form = reactive({
+  email: '',
+  password: '',
+});
 
-async function onSubmit() {
-  loading.value = true
-  error.value = null
+const loading = ref(false);
+const error = ref<string | null>(null);
+
+async function submit() {
+  error.value = null;
+  loading.value = true;
   try {
-    const res = await api.login(email.value, password.value)
-    localStorage.setItem('pw.token', res.token)
-    localStorage.setItem('pw.user.email', res.user.email)
-    router.push((route.query.redirect as string) || '/')
+    const res = await api.login(form.email, form.password);
+
+    // stocker token + user pour l’avatar, etc.
+    localStorage.setItem('pw.token', res.token);
+    localStorage.setItem('pw.user', JSON.stringify(res.user));
+
+    await router.push('/');
   } catch (e: any) {
-    error.value = e?.message ?? 'Invalid credentials'
+    error.value = e?.message ?? String(e);
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 </script>
 
 <template>
-  <div class="min-h-[calc(100vh)] flex items-center justify-center">
-    <div
-      class="w-full max-w-md rounded-2xl border border-slate-200/70 bg-white/90 p-8
-             dark:border-slate-800/80 dark:bg-slate-900/90 shadow-xl"
-    >
-      <h1 class="text-xl font-semibold text-slate-900 dark:text-slate-50 mb-2">PlanWatch</h1>
-      <p class="text-sm text-slate-500 dark:text-slate-400 mb-6">Sign in to your workspace</p>
+  <div class="min-h-screen flex items-center justify-center px-4">
+    <Card class="w-full max-w-md">
+      <div class="card-body space-y-5">
+        <header class="space-y-1">
+          <h1 class="text-lg font-semibold text-slate-900 dark:text-slate-50">
+            Sign in to PlanWatch
+          </h1>
+          <p class="text-xs text-slate-500 dark:text-slate-400">
+            Use your email and password.
+          </p>
+        </header>
 
-      <form @submit.prevent="onSubmit" class="space-y-4">
-        <div>
-          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
-            Email
-          </label>
-          <input
-            v-model="email"
-            type="email"
-            autocomplete="email"
-            required
-            class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm
-                   bg-white focus:outline-none focus:ring-2 focus:ring-violet-500
-                   dark:bg-slate-950 dark:border-slate-700 dark:text-slate-50"
-          />
-        </div>
+        <AlertMessage
+          v-if="error"
+          type="error"
+          :show="true"
+          dense
+          :message="error"
+        />
 
-        <div>
-          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
-            Password
-          </label>
-          <input
-            v-model="password"
-            type="password"
-            autocomplete="current-password"
-            required
-            class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm
-                   bg-white focus:outline-none focus:ring-2 focus:ring-violet-500
-                   dark:bg-slate-950 dark:border-slate-700 dark:text-slate-50"
-          />
-        </div>
+        <form class="space-y-4" @submit.prevent="submit">
+          <Field label="Email">
+            <Input
+              v-model="form.email"
+              type="email"
+              required
+              autocomplete="email"
+            />
+          </Field>
 
-        <p v-if="error" class="text-xs text-rose-400">{{ error }}</p>
+          <Field label="Password">
+            <Input
+              v-model="form.password"
+              type="password"
+              required
+              autocomplete="current-password"
+            />
+          </Field>
 
-        <button
-          type="submit"
-          :disabled="loading"
-          class="w-full flex items-center justify-center rounded-lg bg-violet-600 text-white text-sm
-                 py-2.5 font-medium hover:bg-violet-500 disabled:opacity-60 disabled:cursor-not-allowed
-                 transition"
-        >
-          <span v-if="!loading">Sign in</span>
-          <span v-else>Signing in…</span>
-        </button>
-      </form>
-    </div>
+          <Button
+            type="submit"
+            class="w-full"
+            :disabled="loading"
+          >
+            <span v-if="!loading">Sign in</span>
+            <span v-else>Signing in…</span>
+          </Button>
+        </form>
+
+        <p class="text-xs text-slate-500 dark:text-slate-400">
+          No account yet?
+          <RouterLink
+            to="/signup"
+            class="font-medium text-brand hover:underline"
+          >
+            Create one
+          </RouterLink>
+        </p>
+      </div>
+    </Card>
   </div>
 </template>

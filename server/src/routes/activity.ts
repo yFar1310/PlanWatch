@@ -1,29 +1,46 @@
+// server/src/routes/activity.ts
 import type { Context } from 'hono';
-import { z } from 'zod';
+import type { JWTPayload } from '../middlewares/auth.js';
 import { getMongoDb } from '../db/mongo.js';
 
-const qSchema = z.object({
-  limit: z.coerce.number().int().min(1).max(50).default(10),
-});
-
 export default async function activityHandler(c: Context) {
-  const qp = qSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
+  const auth = c.get('user') as JWTPayload | undefined;
+  if (!auth) {
+    return c.json({ ok: false, error: 'unauthorized' }, 401);
+  }
+
+  const url = new URL(c.req.url);
+  const limit = Math.min(Number(url.searchParams.get('limit') ?? '20'), 100);
+  const beforeStr = url.searchParams.get('before');
+  const before = beforeStr ? new Date(beforeStr) : new Date();
+
   const db = await getMongoDb();
 
-  const docs = await db
+  const cursor = db
     .collection('events')
-    .find({})
+    .find({
+      userId: auth.userId,          // ⬅️ très important
+      at: { $lt: before },
+    })
     .sort({ at: -1 })
-    .limit(qp.limit)
-    .toArray();
+    .limit(limit + 1);
 
-  const items = docs.map((d: any) => ({
-    id: d._id?.toString(),
-    type: d.type,
-    at: d.at instanceof Date ? d.at.toISOString() : d.at,
-    planId: d.planId ?? null,
-    dependsOn: d.dependsOn ?? (d.payload?.dependsOn ?? null),
+  const docs = await cursor.toArray();
+  const hasMore = docs.length > limit;
+
+  const slice = hasMore ? docs.slice(0, limit) : docs;
+
+  const items = slice.map((doc: any) => ({
+    id: String(doc._id),
+    type: doc.type,                // 'plan_submitted' | 'plan_updated' | 'plan_deleted'
+    at: doc.at,
+    planId: doc.planId,
+    dependsOn: doc.dependsOn ?? null,
+    title: doc.payload?.title ?? `Plan #${doc.planId}`,
   }));
 
-  return c.json({ items });
+  const nextCursor =
+    hasMore && docs[limit]?.at ? docs[limit].at.toISOString() : null;
+
+  return c.json({ items, nextCursor });
 }

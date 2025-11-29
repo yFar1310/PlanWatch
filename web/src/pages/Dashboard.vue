@@ -6,7 +6,11 @@ import { formatMinutes } from '../lib/format';
 import type { DashboardStats, ActivityEvent, Plan } from '../types'
 import PERTGraph  from '../components/PERT/PERTGraph.vue'; 
 import Card from '../components/ui/Card.vue';
+import { useRouter } from 'vue-router';
+import ScrollTopFab from '../components/common/ScrollTopFab.vue';
+
 const api = useApi()
+const router = useRouter();
 
 type PertTask = {
   id: number
@@ -89,6 +93,21 @@ async function handleDownloadActivity() {
   }
 }
 
+function priorityInfo(p: Plan) {
+  const value = p.priority ?? 0;
+  if (value >= 2) {
+    return { label: 'High', class: 'text-rose-300', dot: 'bg-rose-400' };
+  }
+  if (value <= -1) {
+    return { label: 'Low', class: 'text-slate-400', dot: 'bg-slate-400' };
+  }
+  return { label: 'Normal', class: 'text-amber-300', dot: 'bg-amber-400' };
+}
+
+function goToActivity() {
+  router.push('/activity');
+}
+
 
 // --- initial load ---
 onMounted(async () => {
@@ -104,7 +123,7 @@ onMounted(async () => {
 
   // Activity (Mongo)
   try {
-    const r = await api.listActivity(8)
+    const r = await api.listActivity({ limit: 8 });
     events.value = Array.isArray(r.items) ? r.items : (r as any)
   } catch (e: any) {
     eventsError.value = e?.message ?? String(e)
@@ -179,48 +198,58 @@ const boardByStatus = computed(() => {
     notStarted: [] as Plan[],
     inProgress: [] as Plan[],
     done: [] as Plan[],
-  }
-  const now = new Date()
-  const todayStart = startOfDay(now)
-  const todayEnd = endOfDay(now)
+  };
+
+  const now = new Date();
+  const todayStart = startOfDay(now);
+  const todayEnd = endOfDay(now);
 
   for (const p of filteredPlans.value) {
-    const due = new Date(p.dueAt)
-    const isDone = p.actualMinutes != null && p.actualMinutes > 0
+    const due = new Date(p.dueAt);
+    const isDone = p.status === 'done'
+    const isInProgress =
+      p.status === 'in_progress' ||
+      (!isDone && due >= todayStart && due <= todayEnd);
 
     if (isDone) {
-      res.done.push(p)
-    } else if (due >= todayStart && due <= todayEnd) {
-      // we "promote" today's tasks as in progress
-      res.inProgress.push(p)
+      res.done.push(p);
+    } else if (isInProgress) {
+      res.inProgress.push(p);
     } else {
-      res.notStarted.push(p)
+      res.notStarted.push(p);
     }
   }
 
-  return res
-})
+  return res;
+});
 
 // Badges style: Do it today / remaining / overdue / done
 function statusBadge(p: Plan) {
-  const now = new Date()
-  const todayStart = startOfDay(now)
-  const due = new Date(p.dueAt)
-  const isDone = p.actualMinutes != null && p.actualMinutes > 0
+  const now = new Date();
+  const todayStart = startOfDay(now);
+  const due = new Date(p.dueAt);
+  const isDone = p.status === 'done'
 
-  if (isDone) return { label: 'Done', variant: 'done' as const }
+  if (isDone) return { label: 'Done', variant: 'done' as const };
 
   if (due < todayStart) {
-    return { label: 'Overdue', variant: 'danger' as const }
+    return { label: 'Overdue', variant: 'danger' as const };
   }
 
   const diffDays = Math.round(
-    (startOfDay(due).getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24)
-  )
-  if (diffDays === 0) return { label: 'Do it today!', variant: 'today' as const }
-  if (diffDays === 1) return { label: '1 day remaining', variant: 'soon' as const }
+    (startOfDay(due).getTime() - todayStart.getTime()) /
+      (1000 * 60 * 60 * 24),
+  );
 
-  return { label: `${diffDays} days remaining`, variant: 'soon' as const }
+  if (p.status === 'in_progress' && diffDays === 0) {
+    return { label: 'In progress', variant: 'today' as const };
+  }
+
+  if (diffDays === 0) return { label: 'Do it today!', variant: 'today' as const };
+  if (diffDays === 1)
+    return { label: '1 day remaining', variant: 'soon' as const };
+
+  return { label: `${diffDays} days remaining`, variant: 'soon' as const };
 }
 
 function badgeClass(variant: 'danger' | 'today' | 'soon' | 'done') {
@@ -327,7 +356,10 @@ function formatDateShort(iso: string) {
       </section>
 
       <!-- Recent activity (Mongo) -->
-      <section class="card sm:col-span-2 lg:col-span-1">
+      <section
+        class="card sm:col-span-2 lg:col-span-1 cursor-pointer transition hover:ring-1 hover:ring-slate-500/40"
+        @click="goToActivity"
+      >
         <div class="card-body">
           <div class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-3">
@@ -341,7 +373,7 @@ function formatDateShort(iso: string) {
                     px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800
                     disabled:opacity-50 disabled:cursor-not-allowed"
               :disabled="eventsLoading || !events.length || downloadingActivity"
-              @click="handleDownloadActivity"
+              @click.stop="handleDownloadActivity"
             >
               <Download class="h-3 w-3" />
               <span>{{ downloadingActivity ? 'Preparing…' : 'Download' }}</span>
@@ -454,6 +486,10 @@ function formatDateShort(iso: string) {
             <p class="text-[11px] text-slate-500 dark:text-slate-400">
               {{ formatDateShort(p.dueAt) }}
             </p>
+            <p class="mt-0.5 flex items-center gap-1 text-[11px]" :class="priorityInfo(p).class">
+            <span :class="['h-1.5 w-1.5 rounded-full', priorityInfo(p).dot]" />
+            <span>{{ priorityInfo(p).label }} priority</span>
+          </p>
           </div>
           <span
             v-tooltip="statusBadge(p).label"
@@ -603,5 +639,6 @@ function formatDateShort(iso: string) {
       </div>
     </Card>
   </section>
+  <ScrollTopFab :bottom="88" />
   </div>
 </template>
