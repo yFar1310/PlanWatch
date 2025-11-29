@@ -47,7 +47,6 @@ Le front **Vue 3 (Vite)** consomme une API **Hono** qui écrit à la fois dans P
 - [🛣️ API (Hono)](#️-api-hono)
 - [🖥️ Front (Vue 3 + Vite + Tailwind)](#️-front-vue-3--vite--tailwind)
 - [📦 Seed & comptes de démo](#-seed--comptes-de-démo)
-- [📜 Scripts NPM](#-scripts-npm)
 - [✅ Qualité & Tests](#-qualité--tests)
 - [🩺 Dépannage](#-dépannage)
 - [👥 Équipe](#-équipe-)
@@ -99,6 +98,9 @@ PlanWatch/
 cd infra
 docker compose up --build
 ```
+
+email : yahya@planwatch.test
+Mot de passe  : Planwatch@123
 
 - Web : `http://localhost:5173`
 - API : `http://localhost:3000`
