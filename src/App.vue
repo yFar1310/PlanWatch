@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { CalendarDays, Check, ChevronDown, CircleCheck, ListTodo, LoaderCircle, Plus, RefreshCw, RotateCcw, Search, SunMoon, Trash2, X } from '@lucide/vue';
+import { CalendarDays, Check, ChevronDown, CircleCheck, ListTodo, LoaderCircle, Moon, Plus, RefreshCw, RotateCcw, Search, Sun, Trash2, X } from '@lucide/vue';
 import type { Task, TaskPage } from '../shared/tasks';
 import { currentDay, formatDay, nextDay, TIME_ZONE } from '../shared/calendar';
 import { api, ApiError } from './api';
@@ -21,7 +21,7 @@ const notice = ref('');
 const editing = ref<string | null>(null);
 const lastDeleted = ref<Task | null>(null);
 const today = ref(currentDay());
-const theme = useTheme();
+const { isDark, toggle: toggleTheme } = useTheme();
 const titleInput = ref<HTMLInputElement | null>(null);
 const listRegion = ref<HTMLElement | null>(null);
 const heading = computed(() => view.value === 'today' ? 'A little focus for today.' : view.value === 'trash' ? 'Room to reconsider.' : 'Everything in one place.');
@@ -175,7 +175,12 @@ onUnmounted(() => {
     <main>
       <header class="topbar">
         <span class="workspace-heading">Your personal workspace</span>
-        <div class="topbar-actions"><span class="local-badge"><span class="small-dot"></span> On this computer</span><label class="theme-control"><SunMoon :size="17" /><span class="sr-only">Appearance</span><select v-model="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div>
+        <div class="topbar-actions">
+          <span class="local-badge"><span class="small-dot"></span> On this computer</span>
+          <button class="theme-toggle" type="button" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme">
+            <component :is="isDark ? Sun : Moon" :key="isDark ? 'sun' : 'moon'" :size="20" aria-hidden="true" />
+          </button>
+        </div>
       </header>
       <div class="content">
         <div class="heading-row">

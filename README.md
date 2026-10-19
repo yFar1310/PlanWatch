@@ -48,7 +48,7 @@ Tasks persist under `.wrangler/state/` in this checkout; do not delete that dire
 - Title-only task capture, optional planned days, Today/Tomorrow/No date shortcuts, editable notes and time estimates, explicit status/completion, and actual time spent.
 - Tasks with Open/Done/All filters and database search across titles and notes, including records beyond the loaded page.
 - Durable Trash with search and restoration after refresh, plus undo for the last deletion. Trash is ordered by deletion time.
-- Light, Dark, and System appearance settings, saved on this device and applied before the first app render. System mode follows device theme changes.
+- A sun/moon button switches directly between light and dark, with the choice saved on this device and applied before the first app render. The initial appearance follows the system until a choice is made.
 - Capture and task-edit drafts survive refresh in browser storage when available. Save conflicts retain drafts and offer an explicit choice to use the saved version.
 - Real D1 persistence, full activity snapshots, duplicate-create protection, and stale-edit checks.
 - Dependency validation in the API/database; the relationship editor and map come later.
