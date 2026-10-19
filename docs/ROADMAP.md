@@ -14,6 +14,8 @@ Implement title-first capture, optional dates/estimates, explicit statuses, actu
 
 Done: create, edit, clear, complete, reopen, reschedule, delete, restore, and find tasks work consistently after refresh. Drafts survive recoverable failures and repeated submissions do not duplicate tasks.
 
+Current status: Today, optional planned days, rescheduling, database search/filters, durable Trash, Light/Dark/System appearance, and device-local drafts are implemented. Type checks, 28 Workers integration tests, production builds, and local HTTP checks pass. Browser interaction and visual review remain open; see [daily-planning notes](DAILY-PLANNING.md).
+
 ## 3. Deliver phone access
 
 Add secure personal authentication, Cloudflare preview deployment, one-origin API/static delivery, PWA installation, safe-area layouts, and connection feedback. Measure actual resource usage. Add backups and test restoration before migrating any existing personal data.

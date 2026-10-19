@@ -47,4 +47,4 @@ D1 is a reasonable candidate for the next milestone based on the local correctne
 
 ## Next implementation slice
 
-Build the daily task experience around dates, Today, search, rescheduling, durable drafts, and Trash. Review the UI on desktop and phone widths. Authentication, hosted backups with a tested restore, and a deployment rollback come before connecting the app to personal daily data or enabling public access.
+The daily task experience is now implemented; see [daily-planning notes](DAILY-PLANNING.md) for the current checks and open browser-review gate. Authentication, hosted backups with a tested restore, and a deployment rollback come before connecting the app to personal daily data or enabling public access.

@@ -8,6 +8,7 @@ export interface Task {
   estimateMinutes: number | null;
   actualMinutes: number | null;
   dependsOn: string | null;
+  plannedDate: string | null;
   createdAt: number;
   updatedAt: number;
   completedAt: number | null;

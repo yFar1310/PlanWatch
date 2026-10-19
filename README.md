@@ -44,13 +44,17 @@ Tasks persist under `.wrangler/state/` in this checkout; do not delete that dire
 
 ## Current prototype
 
-- Title-only task capture, editable notes and time estimates, explicit status/completion, and actual time spent.
-- Soft deletion with an undo list for the current page session. A permanent Trash screen comes later.
+- Today opens by default with open work planned for today or earlier, using Europe/Paris calendar days.
+- Title-only task capture, optional planned days, Today/Tomorrow/No date shortcuts, editable notes and time estimates, explicit status/completion, and actual time spent.
+- Tasks with Open/Done/All filters and database search across titles and notes, including records beyond the loaded page.
+- Durable Trash with search and restoration after refresh, plus undo for the last deletion. Trash is ordered by deletion time.
+- Light, Dark, and System appearance settings, saved on this device and applied before the first app render. System mode follows device theme changes.
+- Capture and task-edit drafts survive refresh in browser storage when available. Save conflicts retain drafts and offer an explicit choice to use the saved version.
 - Real D1 persistence, full activity snapshots, duplicate-create protection, and stale-edit checks.
 - Dependency validation in the API/database; the relationship editor and map come later.
 - Responsive interface with labeled controls, keyboard focus states, and reduced-motion support. Browser visual and interaction review is still pending.
 
-This milestone has no personal authentication. API access requires both a loopback hostname and the local development flag. The committed configuration disables access by default. Do not expose the dev server through a tunnel or public proxy. Authentication, dates/Today/search, PWA installation, goals/map, AI coaching, and scheduled reports follow [the roadmap](docs/ROADMAP.md).
+This milestone has no personal authentication. API access requires both a loopback hostname and the local development flag. The committed configuration disables access by default. Do not expose the dev server through a tunnel or public proxy. Authentication, PWA installation, goals/map, AI coaching, and scheduled reports follow [the roadmap](docs/ROADMAP.md).
 
 ## Verify
 
@@ -58,7 +62,7 @@ This milestone has no personal authentication. API access requires both a loopba
 npm run check
 ```
 
-Runs strict TypeScript checks, 17 integration tests in the Workers runtime, and the production build. Tests use an isolated database and do not change the persistent development database. The PDF probe tests runtime compatibility, not a finished report template or free-tier CPU suitability. See [foundation findings](docs/FOUNDATION.md).
+Runs strict TypeScript checks, 28 integration tests in the Workers runtime, and the production build. Tests use an isolated database and do not change the persistent development database. The PDF probe tests runtime compatibility, not a finished report template or free-tier CPU suitability. See [foundation findings](docs/FOUNDATION.md) and [daily-planning notes](docs/DAILY-PLANNING.md).
 
 Use new numbered SQL migrations for schema changes after this baseline; do not edit an already-applied migration.
 

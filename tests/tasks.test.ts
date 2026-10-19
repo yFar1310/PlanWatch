@@ -4,6 +4,7 @@ import worker from '../worker';
 import { createPdfProbe } from '../worker/pdf';
 import { testEnv } from './setup';
 import { createTask } from '../worker/tasks';
+import { currentDay, nextDay } from '../shared/calendar';
 
 const db = testEnv.DB;
 async function api(path: string, method = 'GET', input?: unknown, key?: string) {
@@ -195,5 +196,135 @@ describe('task foundation in the real Workers runtime', () => {
     const bytes = await createPdfProbe();
     expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe('%PDF-');
     expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
+  });
+
+  it('reschedules and clears calendar dates while recording the before and after values', async () => {
+    const task = await add({ plannedDate: '2026-10-19' });
+    const moved = await api(`/tasks/${task.id}`, 'PATCH', { version: task.version, plannedDate: '2026-10-20' });
+    expect(moved.body.task.plannedDate).toBe('2026-10-20');
+    const cleared = await api(`/tasks/${task.id}`, 'PATCH', { version: moved.body.task.version, plannedDate: null });
+    expect(cleared.body.task.plannedDate).toBeNull();
+    const history = await events(task.id);
+    expect(JSON.parse(history[1].before_json as string).plannedDate).toBe('2026-10-19');
+    expect(JSON.parse(history[1].after_json as string).plannedDate).toBe('2026-10-20');
+    expect(JSON.parse(history[2].after_json as string).plannedDate).toBeNull();
+  });
+
+  it('rejects impossible calendar dates in both the API and database', async () => {
+    for (const plannedDate of ['2026-02-29', '2026-04-31', '2026-13-01', '2026-1-2', '0000-01-01']) {
+      expect((await api('/tasks', 'POST', { title: 'Invalid date', plannedDate }, crypto.randomUUID())).status).toBe(400);
+    }
+    const task = await add({ plannedDate: '2028-02-29' });
+    await expect(db.prepare("UPDATE tasks SET planned_date='2026-02-30' WHERE id=?").bind(task.id).run()).rejects.toThrow();
+    expect((await api(`/tasks/${task.id}`)).body.task.plannedDate).toBe('2028-02-29');
+  });
+
+  it('shows open tasks planned for today and overdue work without future, undated, done or deleted tasks', async () => {
+    const overdue = await add({ plannedDate: '2026-10-18' });
+    const today = await add({ plannedDate: '2026-10-19', status: 'doing' });
+    await add({ plannedDate: '2026-10-20' });
+    await add();
+    await add({ plannedDate: '2026-10-19', status: 'done' });
+    const deleted = await add({ plannedDate: '2026-10-19' });
+    await api(`/tasks/${deleted.id}`, 'DELETE', { version: deleted.version });
+    const result = await api('/tasks?view=today&day=2026-10-19');
+    expect(result.body.items.map((task: { id: string }) => task.id).sort()).toEqual([today.id, overdue.id].sort());
+    expect((await api('/tasks?view=today')).status).toBe(400);
+  });
+
+  it('searches the database beyond the first page and treats wildcard characters literally', async () => {
+    const target = await add({ title: 'Read 100% of chapter_1', notes: 'Keep the original notes' });
+    for (let i = 0; i < 51; i++) await add({ title: `Newer task ${i}` });
+    expect((await api('/tasks')).body.items.some((task: { id: string }) => task.id === target.id)).toBe(false);
+    for (const q of ['100%', 'chapter_1', 'ORIGINAL NOTES']) {
+      const found = await api(`/tasks?q=${encodeURIComponent(q)}`);
+      expect(found.body.items.map((task: { id: string }) => task.id)).toEqual([target.id]);
+    }
+    expect((await api(`/tasks?q=${encodeURIComponent("' OR 1=1 --")}`)).body.items).toHaveLength(0);
+  });
+
+  it('filters statuses on the server before pagination', async () => {
+    const done = await add({ status: 'done' });
+    await add({ status: 'doing' });
+    const todo = await add();
+    const result = await api('/tasks?status=done&limit=1');
+    expect(result.body.items.map((task: { id: string }) => task.id)).toEqual([done.id]);
+    expect(result.body.nextCursor).toBeNull();
+    expect((await api('/tasks?status=open')).body.items.some((task: { id: string }) => task.id === todo.id)).toBe(true);
+    expect((await api('/tasks?status=unknown')).status).toBe(400);
+  });
+
+  it('finds deleted tasks after independent requests and removes them from Trash on restore', async () => {
+    const task = await add({ title: 'Keep in Trash', plannedDate: '2026-10-19' });
+    await add();
+    const deleted = await api(`/tasks/${task.id}`, 'DELETE', { version: task.version });
+    const trash = await api('/tasks?view=trash&q=Keep');
+    expect(trash.body.items.map((task: { id: string }) => task.id)).toEqual([task.id]);
+    expect(trash.body.items[0].deletedAt).toBeTypeOf('number');
+    const restored = await api(`/tasks/${task.id}/restore`, 'POST', { version: deleted.body.task.version });
+    expect(restored.body.task.plannedDate).toBe('2026-10-19');
+    expect((await api('/tasks?view=trash')).body.items).toHaveLength(0);
+  });
+
+  it('binds cursors to their filters and supports non-ASCII search cursors', async () => {
+    await add({ title: 'A café visit' });
+    await add({ title: 'Another café visit' });
+    const first = await api('/tasks?q=caf%C3%A9&limit=1');
+    const cursor = encodeURIComponent(first.body.nextCursor);
+    const second = await api(`/tasks?q=caf%C3%A9&limit=1&cursor=${cursor}`);
+    expect(second.status).toBe(200);
+    expect(second.body.items[0].id).not.toBe(first.body.items[0].id);
+    expect((await api(`/tasks?view=trash&cursor=${cursor}`)).status).toBe(400);
+  });
+
+  it('preserves old creation keys across the date migration and rejects changed planned dates', async () => {
+    const key = crypto.randomUUID();
+    const saved = await api('/tasks', 'POST', { title: 'Existing task' }, key);
+    await db.prepare("UPDATE tasks SET creation_payload=json_remove(creation_payload, '$.plannedDate') WHERE id=?").bind(saved.body.task.id).run();
+    const count = (await events(saved.body.task.id)).length;
+    const replay = await api('/tasks', 'POST', { title: 'Existing task' }, key);
+    expect(replay.status).toBe(200);
+    expect(replay.body.task.id).toBe(saved.body.task.id);
+    expect(await events(saved.body.task.id)).toHaveLength(count);
+    expect((await api('/tasks', 'POST', { title: 'Existing task', plannedDate: '2026-10-19' }, key)).status).toBe(409);
+  });
+
+  it('uses Paris calendar days across both daylight-saving transitions', () => {
+    expect(currentDay(new Date('2026-03-28T23:30:00Z'))).toBe('2026-03-29');
+    expect(currentDay(new Date('2026-03-29T22:30:00Z'))).toBe('2026-03-30');
+    expect(currentDay(new Date('2026-10-25T22:30:00Z'))).toBe('2026-10-25');
+    expect(currentDay(new Date('2026-10-25T23:30:00Z'))).toBe('2026-10-26');
+    expect(nextDay('2026-03-29')).toBe('2026-03-30');
+    expect(nextDay('2026-10-25')).toBe('2026-10-26');
+  });
+
+  it('replays a create even if its original dependency was deleted afterward', async () => {
+    const parent = await add();
+    const key = crypto.randomUUID();
+    const input = { title: 'A dependent task', dependsOn: parent.id, plannedDate: '2026-10-19' };
+    const created = await api('/tasks', 'POST', input, key);
+    await api(`/tasks/${parent.id}`, 'DELETE', { version: parent.version });
+    const count = (await events(created.body.task.id)).length;
+    const replay = await api('/tasks', 'POST', input, key);
+    expect(replay.status).toBe(200);
+    expect(replay.body.task.id).toBe(created.body.task.id);
+    expect(replay.body.task.dependsOn).toBeNull();
+    expect(await events(created.body.task.id)).toHaveLength(count);
+  });
+
+  it('paginates Trash by deletion time rather than original creation time', async () => {
+    const first = await add();
+    const second = await add();
+    const third = await add();
+    for (const task of [third, first, second]) await api(`/tasks/${task.id}`, 'DELETE', { version: task.version });
+    await db.prepare('UPDATE tasks SET deleted_at = CASE id WHEN ? THEN 1000 WHEN ? THEN 2000 ELSE 3000 END').bind(third.id, first.id).run();
+    const found: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = await api(`/tasks?view=trash&limit=1${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`);
+      found.push(...page.body.items.map((task: { id: string }) => task.id));
+      cursor = page.body.nextCursor;
+    } while (cursor);
+    expect(found).toEqual([second.id, first.id, third.id]);
   });
 });
