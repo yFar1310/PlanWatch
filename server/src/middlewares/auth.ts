@@ -20,8 +20,8 @@ export async function requireAuth(c: Context, next: Next) {
   try {
     const payload = jwt.verify(token, JWT_SECRET) as JWTPayload;
     c.set('user', payload);
-    await next();
   } catch {
     return c.json({ ok: false, error: 'invalid_token' }, 401);
   }
+  await next();
 }

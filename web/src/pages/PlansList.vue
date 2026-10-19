@@ -11,6 +11,11 @@
     </div>
 
     <!-- Desktop table -->
+    <div v-if="loadError" role="alert" class="mb-4 flex items-center justify-between gap-3 rounded-xl bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+      <p>{{ loadError }}</p>
+      <button type="button" :disabled="loading" class="shrink-0 rounded-lg border px-3 py-2" @click="load">{{ loading ? 'Loading…' : 'Retry' }}</button>
+    </div>
+    <p v-if="notice" role="status" class="mb-4 text-sm text-emerald-700 dark:text-emerald-300">{{ notice }}</p>
     <div class="hidden md:block overflow-x-auto">
       <table class="min-w-full text-sm">
         <thead class="text-left text-gray-500 dark:text-gray-400">
@@ -107,7 +112,7 @@
             </td>
           </tr>
 
-          <tr v-if="!loading && !plans.length">
+          <tr v-if="!loading && !loadError && !plans.length">
             <td
               colspan="5"
               class="py-6 text-center text-gray-500 dark:text-gray-400"
@@ -178,7 +183,7 @@
         </p>
       </article>
 
-      <p v-if="!loading && !plans.length" class="text-sm text-gray-500">
+      <p v-if="!loading && !loadError && !plans.length" class="text-sm text-gray-500">
         No plans yet.
       </p>
     </div>
@@ -187,11 +192,14 @@
     <ConfirmModal
       :open="!!pendingDelete"
       title="Delete plan?"
-      @cancel="pendingDelete = null"
+      :busy="deleting"
+      :error="deleteError"
+      @cancel="cancelDelete"
       @confirm="doDelete"
     >
       Are you sure you want to delete
       <strong v-if="pendingDelete">"{{ pendingDelete.title }}"</strong> ?
+      <p class="mt-2">This permanently deletes the task. Tasks that depend on it will have their dependency removed.</p>
     </ConfirmModal>
   </Card>
 </template>
@@ -209,23 +217,48 @@ const api = useApi()
 const plans = ref<Plan[]>([])
 const loading = ref(true)
 const pendingDelete = ref<Plan | null>(null)
+const loadError = ref<string | null>(null)
+const deleteError = ref<string | null>(null)
+const deleting = ref(false)
+const notice = ref<string | null>(null)
 
 function askDelete(p: Plan) {
+  if (deleting.value) return
+  deleteError.value = null
   pendingDelete.value = p
 }
 
-async function doDelete() {
-  if (!pendingDelete.value) return
-  await api.deletePlan(Number(pendingDelete.value.id))
+function cancelDelete() {
+  if (deleting.value) return
   pendingDelete.value = null
-  await load()
+  deleteError.value = null
+}
+
+async function doDelete() {
+  if (!pendingDelete.value || deleting.value) return
+  const task = pendingDelete.value
+  const id = Number(task.id)
+  deleting.value = true
+  deleteError.value = null
+  try {
+    await api.deletePlan(id)
+    plans.value = plans.value.filter((p) => Number(p.id) !== id).map((p) =>
+      Number(p.dependsOn) === id ? { ...p, dependsOn: null } : p)
+    pendingDelete.value = null
+    notice.value = `Deleted “${task.title}”.`
+  } catch (e: any) {
+    deleteError.value = e?.message ?? 'Could not delete this task. Please try again.'
+  } finally { deleting.value = false }
 }
 
 async function load() {
   loading.value = true
+  loadError.value = null
   try {
-    const r = await api.listPlans({ order: 'due_at', dir: 'desc' })
+    const r = await api.listPlans({ order: 'due_at', dir: 'asc' })
     plans.value = r.items
+  } catch (e: any) {
+    loadError.value = e?.message ?? 'Could not load your tasks. Please try again.'
   } finally {
     loading.value = false
   }

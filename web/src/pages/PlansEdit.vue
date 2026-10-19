@@ -5,7 +5,12 @@
       <h1 class="text-xl font-semibold">Edit plan</h1>
     </div>
 
-    <form v-if="!loading" class="grid gap-4" @submit.prevent="save">
+    <div v-if="loadError" role="alert" class="space-y-3 text-sm text-red-600 dark:text-red-400">
+      <p>{{ loadError }}</p>
+      <Button type="button" @click="loadPlan">Retry</Button>
+      <RouterLink to="/plans" class="ml-3 underline">Back to tasks</RouterLink>
+    </div>
+    <form v-else-if="!loading" class="grid gap-4" @submit.prevent="save">
       <Field label="Title">
         <Input v-model="form.title" required minlength="3" />
       </Field>
@@ -124,14 +129,14 @@
       </Field>
 
       <div class="flex items-center gap-2">
-        <Button type="submit" :disabled="saving || !isValid">Save</Button>
+        <Button type="submit" :disabled="saving || !isValid">{{ saving ? 'Saving…' : 'Save' }}</Button>
         <RouterLink
           to="/plans"
           class="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-900"
         >
           Cancel
         </RouterLink>
-        <p v-if="error" class="text-sm text-red-600 ml-2">{{ error }}</p>
+        <p v-if="error" role="alert" class="text-sm text-red-600 ml-2">{{ error }}</p>
       </div>
     </form>
 
@@ -175,11 +180,12 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref<string | null>(null)
 const showSaved = ref(false)
+const loadError = ref<string | null>(null)
 
 const form = reactive({
   title: '',
   expectedMinutes: 60,
-  actualMinutes: undefined as number | undefined,
+  actualMinutes: null as number | null,
   dueAt: null as Date | null,
   note: '',
   dependsOn: null as number | null,
@@ -202,32 +208,35 @@ const dependencyMinDate = computed<Date | undefined>(() => {
   return new Date(dependency.value.dueAt)
 })
 
-onMounted(async () => {
+async function loadPlan() {
+  loading.value = true
+  loadError.value = null
   try {
     const [listRes, p] = await Promise.all([
       api.listPlans(),
       api.getPlan(id),
     ])
 
-    const plan: Plan = (p?.plan ?? p) as Plan
+    const plan = p.plan
     const items: Plan[] = Array.isArray(listRes.items) ? listRes.items : listRes
 
     allPlans.value = items.filter((x) => Number(x.id) !== id)
 
     form.title = plan.title
     form.expectedMinutes = plan.expectedMinutes
-    form.actualMinutes = plan.actualMinutes ?? undefined
+    form.actualMinutes = plan.actualMinutes ?? null
     form.dueAt = plan.dueAt ? new Date(plan.dueAt) : null
     form.note = plan.note ?? ''
     form.dependsOn = (plan.dependsOn ?? null) as number | null
     form.status = (plan.status as PlanStatus) ?? 'not_started';
     form.priority = plan.priority ?? 0;
   } catch (e: any) {
-    error.value = e?.message ?? String(e)
+    loadError.value = e?.message ?? 'Could not load this task. Please try again.'
   } finally {
     loading.value = false
   }
-})
+}
+onMounted(loadPlan)
 
 const isValid = computed(
   () =>
@@ -238,16 +247,16 @@ const isValid = computed(
 )
 
 async function save() {
-  if (!isValid.value) return
+  if (!isValid.value || saving.value) return
   saving.value = true
   error.value = null
   try {
     const patch: Partial<Plan> = {
       title: form.title.trim(),
       expectedMinutes: Number(form.expectedMinutes),
-      actualMinutes: form.actualMinutes ?? undefined,
+      actualMinutes: form.actualMinutes ?? null,
       dueAt: form.dueAt ? (form.dueAt as Date).toISOString() : undefined,
-      note: form.note?.trim() || undefined,
+      note: form.note?.trim() || null,
       dependsOn: form.dependsOn ?? null,
       status: form.status,
       priority: form.priority,

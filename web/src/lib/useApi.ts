@@ -27,10 +27,12 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const res = await fetch(`${BASE}${path}`, {
-    ...options,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { ...options, headers });
+  } catch {
+    throw new Error('Could not connect. Your changes have not been confirmed. Check your connection and refresh before trying again.');
+  }
 
   // 401 -> on nettoie et on renvoie vers /login (sauf si déjà dessus)
   if (res.status === 401 && !path.startsWith('/api/auth/')) {
@@ -49,10 +51,15 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
   }
 
   if (!res.ok) {
-    const msg =
-      data?.error ||
-      data?.message ||
-      `Request failed with status ${res.status}`;
+    const fieldIssue = data?.issues?.[0];
+    const msg = fieldIssue
+      ? `${fieldIssue.path?.join(' ') || 'Task'}: ${fieldIssue.message}`
+      : data?.message || ({
+          unauthorized: 'Your session has expired. Please sign in again.',
+          not_found: 'This task is no longer available. Refresh your task list.',
+          invalid_credentials: 'The email or password is incorrect.',
+          internal: 'Something went wrong. Please try again.',
+        } as Record<string, string>)[data?.error] || `Could not complete the request (${res.status}). Please try again.`;
     throw new Error(msg);
   }
 
@@ -113,7 +120,7 @@ export function useApi() {
     },
 
     getPlan(id: number) {
-      return request<Plan>(`/api/plans/${id}`);
+      return request<{ plan: Plan }>(`/api/plans/${id}`);
     },
 
     updatePlan(id: number, patch: Partial<Plan>) {

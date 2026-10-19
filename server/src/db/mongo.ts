@@ -13,7 +13,7 @@ let cachedDb: Db | null = null;
 
 export async function getMongoDb(): Promise<Db> {
   if (cachedDb) return cachedDb;
-  client = new MongoClient(url);
+  client ??= new MongoClient(url, { serverSelectionTimeoutMS: 5000, connectTimeoutMS: 5000, socketTimeoutMS: 10000 });
   await client.connect();
   cachedDb = client.db();
   return cachedDb;

@@ -268,6 +268,7 @@ onMounted(async () => {
 })
 
 async function submit() {
+  if (loading.value) return
   error.value = null
   response.value = null
 
