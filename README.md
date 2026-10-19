@@ -27,7 +27,40 @@ Cloudflare-first: Vue, TypeScript, Hono, Workers, and a D1 feasibility prototype
 
 The target development workflow uses Wrangler/Vite. Docker is not a requirement for the new implementation. No cloud resources, paid plans, AI requests, or email deliveries have been enabled by creating this branch.
 
-This is the clean starting point: application code and runnable development commands will be added in the first implementation milestone. See [the roadmap](docs/ROADMAP.md).
+## Run locally
+
+Use Node.js 22.12+ (Node 24 recommended):
+
+```sh
+npm ci
+npm run dev
+```
+
+Open http://127.0.0.1:5174. The dev command creates an ignored `.dev.vars` from the example, applies local D1 migrations, and starts Vue and the API together. No Cloudflare login or Docker is needed. Stop with Ctrl+C.
+
+If that port is already in use, run `npm run dev -- --port 5175`. Use a single development server against the local database for normal use.
+
+Tasks persist under `.wrangler/state/` in this checkout; do not delete that directory to restart the app. This database is separate from v1. It is a development database, without the hosted backup/recovery setup planned for the phone-access milestone.
+
+## Current prototype
+
+- Title-only task capture, editable notes and time estimates, explicit status/completion, and actual time spent.
+- Soft deletion with an undo list for the current page session. A permanent Trash screen comes later.
+- Real D1 persistence, full activity snapshots, duplicate-create protection, and stale-edit checks.
+- Dependency validation in the API/database; the relationship editor and map come later.
+- Responsive interface with labeled controls, keyboard focus states, and reduced-motion support. Browser visual and interaction review is still pending.
+
+This milestone has no personal authentication. API access requires both a loopback hostname and the local development flag. The committed configuration disables access by default. Do not expose the dev server through a tunnel or public proxy. Authentication, dates/Today/search, PWA installation, goals/map, AI coaching, and scheduled reports follow [the roadmap](docs/ROADMAP.md).
+
+## Verify
+
+```sh
+npm run check
+```
+
+Runs strict TypeScript checks, 17 integration tests in the Workers runtime, and the production build. Tests use an isolated database and do not change the persistent development database. The PDF probe tests runtime compatibility, not a finished report template or free-tier CPU suitability. See [foundation findings](docs/FOUNDATION.md).
+
+Use new numbered SQL migrations for schema changes after this baseline; do not edit an already-applied migration.
 
 ## Budget
 

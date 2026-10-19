@@ -1,0 +1,2 @@
+# Used by the local prototype only. Production APIs stay locked until real authentication is added.
+LOCAL_DEV=true

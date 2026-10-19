@@ -6,6 +6,8 @@ Set up Vue + TypeScript, Hono, and the local Cloudflare runtime. Prototype D1 pe
 
 Done: a documented local command starts a working prototype; build, type checks, and meaningful reliability tests pass. No old implementation is copied into the new app.
 
+Current status: the local prototype is implemented. See [foundation findings](FOUNDATION.md) for passing checks and remaining browser, hosted-performance, and free-tier report-rendering gates. D1 is provisionally suitable for continuing the local rebuild; the complete hosted budget is not yet proven.
+
 ## 2. Build the task model and daily interface together
 
 Implement title-first capture, optional dates/estimates, explicit statuses, actual completion timestamps, search, pagination, rescheduling, and deletion recovery. Use reusable accessible controls, readable light/dark themes, and visible saving/error/retry states. Today is the default screen; task details retain the user's context.
