@@ -1,0 +1,18 @@
+{
+  "id": "/",
+  "name": "PlanWatch",
+  "short_name": "PlanWatch",
+  "description": "A calmer place for your tasks and what matters next.",
+  "lang": "en",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#12141c",
+  "theme_color": "#7052b4",
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "/icons/app-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/app-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/app-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

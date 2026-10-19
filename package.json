@@ -3,19 +3,26 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.12.0" },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "icons": "node scripts/icons.mjs",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 5174 --strictPort",
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.tools.json",
-    "test": "vitest run",
+    "test": "vitest run && npm run test:app-assets",
+    "test:app-assets": "node --test scripts/tests/*.test.mjs",
     "check": "npm run typecheck && npm test && npm run build",
-    "db:migrate:local": "wrangler d1 migrations apply DB --local"
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:backup:local": "node scripts/database.mjs backup",
+    "db:verify-backup": "node scripts/database.mjs verify"
   },
   "dependencies": {
-    "hono": "^4.0.0",
     "@lucide/vue": "latest",
+    "hono": "^4.0.0",
+    "jose": "^6.2.12",
     "pdf-lib": "^1.17.1",
     "vue": "3.5.44",
     "zod": "^4.0.0"
@@ -24,6 +31,7 @@
     "@cloudflare/vite-plugin": "1.64.0",
     "@cloudflare/vitest-plugin": "1.4.5",
     "@cloudflare/workers-types": "latest",
+    "@resvg/resvg-js": "^2.6.2",
     "@types/node": "^24.0.0",
     "@vitejs/plugin-vue": "6.0.10",
     "typescript": "~5.9.3",

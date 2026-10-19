@@ -1,2 +1,7 @@
 # Used by the local prototype only. Production APIs stay locked until real authentication is added.
 LOCAL_DEV=true
+
+# Hosted configuration (team hostname only, without https://). Keep LOCAL_DEV=false when hosted.
+# ACCESS_TEAM_DOMAIN=your-team.cloudflareaccess.com
+# ACCESS_AUD=your-application-audience
+# OWNER_EMAIL=your-personal-email@example.com

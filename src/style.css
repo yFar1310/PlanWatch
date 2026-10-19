@@ -893,6 +893,11 @@ footer .small-dot {
 .workspace-nav button:hover { background:var(--hover-surface); }
 .workspace-nav button.active { color:var(--accent); background:var(--accent-surface); }
 .topbar-actions { display:flex; gap:22px; align-items:center; }
+.sign-out { text-decoration:none; }
+.connection-banner { display:flex; align-items:center; gap:12px; margin:0 0 18px; padding:12px 15px; color:var(--text); background:var(--accent-surface); border:1px solid var(--border); border-radius:10px; font-size:13px; line-height:1.7; }
+.connection-banner>span { flex:1; }
+.connection-banner a { text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
+footer { flex-wrap:wrap; }
 .theme-toggle {
   width:44px;
   min-height:44px;
@@ -959,6 +964,8 @@ input::placeholder,textarea::placeholder { color:var(--muted); opacity:1; }
 
 @media(max-width:720px) {
   .sidebar { display:flex; flex-wrap:wrap; padding:16px 20px 8px; gap:16px; }
+  .app-shell { padding-top:env(safe-area-inset-top); padding-left:env(safe-area-inset-left); padding-right:env(safe-area-inset-right); }
+  .connection-banner { flex-wrap:wrap; }
   .sidebar .workspace-nav { display:flex; order:3; width:100%; gap:5px; }
   .workspace-nav button { flex:1; justify-content:center; padding:8px 5px; gap:7px; font-size:13px; }
   .topbar { padding:0 20px; height:64px; }

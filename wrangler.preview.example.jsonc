@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // Copy to ignored wrangler.preview.jsonc and fill in the account/D1/Access values.
+  "name": "planwatch-v2-preview",
+  "account_id": "REPLACE_WITH_ACCOUNT_ID",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-19",
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    "LOCAL_DEV": "false",
+    "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com",
+    "ACCESS_AUD": "REPLACE_WITH_APPLICATION_AUDIENCE",
+    "OWNER_EMAIL": "REPLACE_WITH_ALLOWED_EMAIL"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "planwatch-v2-preview",
+    "database_id": "REPLACE_WITH_PREVIEW_D1_ID",
+    "migrations_dir": "migrations"
+  }]
+}

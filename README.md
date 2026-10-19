@@ -40,7 +40,7 @@ Open http://127.0.0.1:5174. The dev command creates an ignored `.dev.vars` from 
 
 If that port is already in use, run `npm run dev -- --port 5175`. Use a single development server against the local database for normal use.
 
-Tasks persist under `.wrangler/state/` in this checkout; do not delete that directory to restart the app. This database is separate from v1. It is a development database, without the hosted backup/recovery setup planned for the phone-access milestone.
+Tasks persist under `.wrangler/state/` in this checkout; do not delete that directory to restart the app. This database is separate from v1. Use `npm run db:backup:local` for a private SQL backup, then the printed verification command to test restoration in an isolated copy. Hosted recovery still needs its own verification.
 
 ## Current prototype
 
@@ -53,8 +53,11 @@ Tasks persist under `.wrangler/state/` in this checkout; do not delete that dire
 - Real D1 persistence, full activity snapshots, duplicate-create protection, and stale-edit checks.
 - Dependency validation in the API/database; the relationship editor and map come later.
 - Responsive interface with labeled controls, keyboard focus states, and reduced-motion support. Browser visual and interaction review is still pending.
+- Install manifest, home-screen icons, safe-area layouts, installation guidance, and an offline screen. Private task/session responses are never cached by the service worker.
+- Connection/session feedback, disabled saves while offline or signed out, and an explicit action for app updates.
+- A Cloudflare Access authentication path with signed-token verification and a single allowed owner. Hosted setup stays closed until configured.
 
-This milestone has no personal authentication. API access requires both a loopback hostname and the local development flag. The committed configuration disables access by default. Do not expose the dev server through a tunnel or public proxy. Authentication, PWA installation, goals/map, AI coaching, and scheduled reports follow [the roadmap](docs/ROADMAP.md).
+Local API access requires both a loopback hostname and the local development flag. Hosted API access requires a verified Cloudflare Access token for the configured team, application, and owner email. The committed development configuration disables public access. See [phone access and hosting](docs/PHONE-ACCESS.md) for configuration, recovery, and remaining real-device checks. Goals/map, AI coaching, and scheduled reports follow [the roadmap](docs/ROADMAP.md).
 
 ## Verify
 
@@ -62,7 +65,7 @@ This milestone has no personal authentication. API access requires both a loopba
 npm run check
 ```
 
-Runs strict TypeScript checks, 28 integration tests in the Workers runtime, and the production build. Tests use an isolated database and do not change the persistent development database. The PDF probe tests runtime compatibility, not a finished report template or free-tier CPU suitability. See [foundation findings](docs/FOUNDATION.md) and [daily-planning notes](docs/DAILY-PLANNING.md).
+Runs strict TypeScript checks, 40 integration tests in the Workers runtime, 13 API-client/service-worker/asset checks, and the production build. Tests use isolated databases and do not change the persistent development database. The PDF probe tests runtime compatibility, not a finished report template or free-tier CPU suitability. See [foundation findings](docs/FOUNDATION.md) and [daily-planning notes](docs/DAILY-PLANNING.md).
 
 Use new numbered SQL migrations for schema changes after this baseline; do not edit an already-applied migration.
 

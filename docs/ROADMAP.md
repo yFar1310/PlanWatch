@@ -22,6 +22,8 @@ Add secure personal authentication, Cloudflare preview deployment, one-origin AP
 
 Done: the app works on the user's real phone while the development laptop is off, with tested sessions, persistence, recovery, and rollback.
 
+Current status: installation assets, safe areas, connection/session feedback, signed Cloudflare Access verification, and local backup/restore tooling are implemented. Forty Workers tests and thirteen client/asset checks pass, and an actual local restore was verified. Cloudflare CLI access is connected; Access configuration, real-device browser checks, hosted recovery/rollback, and measured usage remain acceptance gates. See [phone access](PHONE-ACCESS.md).
+
 ## 4. Add goals, tracking, and the map
 
 Add an editable philosophy/goals profile, optional work sessions and short reflections, and detailed event snapshots. Model task/project/goal relationships and dependencies in the validated datastore. Add readable nodes, tap-to-detail, search, focused chains, fullscreen, and a text alternative. Preserve advanced critical-path analysis with explicit assumptions.

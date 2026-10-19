@@ -5,7 +5,7 @@ import type { Task } from '../shared/tasks';
 import { nextDay } from '../shared/calendar';
 import { clearDraft, drafts, fromTask, storageAvailable, type TaskDraft } from './drafts';
 
-const props = defineProps<{ task: Task; disabled: boolean; today: string }>();
+const props = defineProps<{ task: Task; disabled: boolean; canSave: boolean; today: string }>();
 const emit = defineEmits<{ save: [draft: TaskDraft]; delete: []; close: [] }>();
 const draft = ref<TaskDraft>({ ...(drafts.value[props.task.id] ?? fromTask(props.task)) });
 const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(fromTask(props.task)));
@@ -40,8 +40,8 @@ function useSaved() { draft.value = fromTask(props.task); clearDraft(props.task.
       </div>
       <p class="draft-note">{{ dirty ? (storageAvailable ? 'Unsaved draft kept on this device.' : 'Draft kept while this page stays open. Browser storage is unavailable.') : 'Changes are saved when you choose Save changes.' }}</p>
       <div class="detail-actions">
-        <button type="button" class="delete-button" @click="emit('delete')"><Trash2 :size="16" />Delete</button>
-        <div><button type="button" class="secondary" @click="discard">{{ dirty ? 'Discard draft' : 'Cancel' }}</button><button class="primary" type="submit" :disabled="stale || !dirty || !draft.title.trim()">Save changes<ArrowRight :size="16" /></button></div>
+        <button type="button" class="delete-button" :disabled="!canSave" @click="emit('delete')"><Trash2 :size="16" />Delete</button>
+        <div><button type="button" class="secondary" @click="discard">{{ dirty ? 'Discard draft' : 'Cancel' }}</button><button class="primary" type="submit" :disabled="!canSave || stale || !dirty || !draft.title.trim()">Save changes<ArrowRight :size="16" /></button></div>
       </div>
     </fieldset>
   </form>

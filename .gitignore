@@ -5,6 +5,7 @@ coverage/
 .vite/
 .cache/
 .wrangler/
+wrangler.preview.jsonc
 *.tsbuildinfo
 *.log
 
