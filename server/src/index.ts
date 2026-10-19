@@ -9,6 +9,7 @@ import healthHandler from './routes/health.js';
 import submitHandler from './routes/submit.js';
 import { pool } from './db/pg.js';
 import { getMongoDb, closeMongo } from './db/mongo.js';
+import { ensureOutboxSchema, startTaskEventWorker } from './db/outbox.js';
 import listPlansHandler from './routes/plans.js';
 import getPlanHandler from './routes/getPlan.js';
 import updatePlanHandler from './routes/updatePlan.js';
@@ -353,6 +354,10 @@ async function ensureSchema() {
   `;
 
   await pool.query(sql);
+  await ensureOutboxSchema();
+
+  // Demo creation and destructive reset are opt-in, never ordinary startup work.
+  if (process.env.SEED_DEMO_DATA !== 'true') return;
 
   // ----------------------------------------------------------
   // Reset optionnel (Railway / dev)
@@ -486,12 +491,7 @@ async function ensureSchema() {
       const id = existing.rows[0].id as number;
       userIds[email] = id;
   
-      // on force le password & le full_name à la valeur de seed
-      await pool.query(
-        'UPDATE users SET password_hash = $1, full_name = $2 WHERE id = $3',
-        [hash, u.fullName, id],
-      );
-      console.log('[PG] Updated seed user', email);
+      console.log('[PG] Kept existing seed user', email);
     }
   }
   
@@ -602,6 +602,10 @@ async function ensureSchema() {
 async function ensureMongoSchema() {
   const db = await getMongoDb();
 
+  await db.collection('events').createIndex(
+    { eventId: 1 }, { unique: true, partialFilterExpression: { eventId: { $exists: true } } },
+  );
+
   await db
     .collection('plans')
     .createIndex({ pgId: 1, userId: 1 }, { unique: true })
@@ -628,12 +632,12 @@ async function ensureMongoSchema() {
 // ---------------------------------------------------------------------------
 // Bootstrap
 // ---------------------------------------------------------------------------
+let stopTaskEvents: (() => Promise<void>) | undefined;
+
 async function start() {
   console.log('Boot config', {
     HOST,
     PORT,
-    POSTGRES_URL: process.env.POSTGRES_URL,
-    MONGO_URL: process.env.MONGO_URL,
     CORS_ORIGIN: ORIGIN,
   });
 
@@ -643,7 +647,7 @@ async function start() {
     await ensureSchema();
     console.log('[PG] Schema OK (with seed & migrations)');
   } catch (e) {
-    console.error('[PG] Connection or schema FAILED:', e);
+    throw new Error('PostgreSQL connection or schema initialization failed.', { cause: e });
   }
 
   try {
@@ -654,11 +658,13 @@ async function start() {
   }
 
   console.log('Starting HTTP server…');
+  stopTaskEvents = startTaskEventWorker();
   serve({ fetch: app.fetch, port: PORT, hostname: HOST });
 }
 
 start().catch((e) => {
   console.error('Fatal error during startup', e);
+  process.exit(1);
 });
 
 // ---------------------------------------------------------------------------
@@ -666,6 +672,7 @@ start().catch((e) => {
 // ---------------------------------------------------------------------------
 async function shutdown() {
   console.log('Shutting down…');
+  await stopTaskEvents?.();
   try {
     await pool.end();
   } catch (e) {

@@ -109,6 +109,17 @@ function goToActivity() {
 }
 
 
+async function loadPlans() {
+  plansLoading.value = true
+  plansError.value = null
+  try {
+    const r = await api.listPlans({ order: 'due_at', dir: 'asc', limit: 200 })
+    plans.value = r.items
+  } catch (e: any) {
+    plansError.value = e?.message ?? 'Could not load your tasks.'
+  } finally { plansLoading.value = false }
+}
+
 // --- initial load ---
 onMounted(async () => {
   // Stats (Postgres)
@@ -132,14 +143,7 @@ onMounted(async () => {
   }
 
   // Plans (Postgres) for board
-  try {
-    const r = await api.listPlans({ order: 'due_at', dir: 'asc', limit: 200 })
-    plans.value = Array.isArray(r.items) ? r.items : r
-  } catch (e: any) {
-    plansError.value = e?.message ?? String(e)
-  } finally {
-    plansLoading.value = false
-  }
+  await loadPlans()
 
   // PERT
   try {
@@ -200,16 +204,9 @@ const boardByStatus = computed(() => {
     done: [] as Plan[],
   };
 
-  const now = new Date();
-  const todayStart = startOfDay(now);
-  const todayEnd = endOfDay(now);
-
   for (const p of filteredPlans.value) {
-    const due = new Date(p.dueAt);
     const isDone = p.status === 'done'
-    const isInProgress =
-      p.status === 'in_progress' ||
-      (!isDone && due >= todayStart && due <= todayEnd);
+    const isInProgress = p.status === 'in_progress';
 
     if (isDone) {
       res.done.push(p);
@@ -455,7 +452,14 @@ function formatDateShort(iso: string) {
   </div>
 
   <!-- 3 colonnes : Not started / In progress / Done -->
-  <div class="grid gap-4 lg:grid-cols-3">
+  <div v-if="plansLoading" role="status" class="rounded-xl border border-slate-200 p-6 text-sm text-slate-500 dark:border-slate-800">
+    Loading your tasks…
+  </div>
+  <div v-else-if="plansError" role="alert" class="flex items-center justify-between gap-3 rounded-xl bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+    <p>{{ plansError }}</p>
+    <button type="button" class="rounded-lg border px-3 py-2" @click="loadPlans">Retry</button>
+  </div>
+  <div v-else class="grid gap-4 lg:grid-cols-3">
     <!-- NOT STARTED -->
     <div
       class="rounded-2xl border border-slate-200/70 bg-white/80 backdrop-blur
@@ -584,7 +588,7 @@ function formatDateShort(iso: string) {
               {{ p.title }}
             </div>
             <p class="text-[11px] text-slate-500 dark:text-slate-400">
-              Done {{ formatDateShort(p.dueAt) }}
+              Due {{ formatDateShort(p.dueAt) }}
             </p>
           </div>
           <span

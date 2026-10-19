@@ -2,6 +2,7 @@
 import type { Context } from 'hono';
 import { pool } from '../db/pg.js';
 import type { JWTPayload } from '../middlewares/auth.js';
+import { planIdSchema } from '../domain/plans.js';
 
 export default async function getPlanHandler(c: Context) {
   const auth = c.get('user') as JWTPayload | undefined;
@@ -9,8 +10,8 @@ export default async function getPlanHandler(c: Context) {
     return c.json({ error: 'unauthorized' }, 401);
   }
 
-  const id = Number(c.req.param('id'));
-  if (!Number.isFinite(id)) {
+  const parsedId = planIdSchema.safeParse(c.req.param('id'));
+  if (!parsedId.success) {
     return c.json({ error: 'invalid_id' }, 400);
   }
 
@@ -32,7 +33,7 @@ export default async function getPlanHandler(c: Context) {
       FROM plans
       WHERE id = $1 AND user_id = $2
     `,
-    [id, auth.userId],
+    [parsedId.data, auth.userId],
   );
 
   if (!rows.length) {

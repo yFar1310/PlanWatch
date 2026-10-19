@@ -67,11 +67,7 @@ export default async function pertHandler(c: Context) {
     function computeForward(id: number) {
       if (ef.has(id)) return;
       if (visiting.has(id)) {
-        const n = byId.get(id);
-        const dur = n?.duration ?? 0;
-        es.set(id, 0);
-        ef.set(id, dur);
-        return;
+        throw new Error('dependency_cycle');
       }
 
       const n = byId.get(id);
@@ -140,6 +136,9 @@ export default async function pertHandler(c: Context) {
 
     return c.json({ tasks, projectDuration });
   } catch (e: any) {
+    if (e?.message === 'dependency_cycle') {
+      return c.json({ error: 'dependency_cycle', message: 'The map contains a dependency loop. Edit the linked tasks to remove it.' }, 409);
+    }
     console.error('pert error', e);
     return c.json(
       { error: 'internal', message: e?.message ?? 'internal_error' },

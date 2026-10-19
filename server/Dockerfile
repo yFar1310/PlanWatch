@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY tsconfig.json ./
 COPY src ./src
+COPY test ./test
 
 RUN npm ci --production=false --no-audit --no-fund
 
