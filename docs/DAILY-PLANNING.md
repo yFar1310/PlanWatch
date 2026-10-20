@@ -24,3 +24,11 @@ All twelve checked color pairs (main/muted text, selected controls, primary butt
 ## Next gate
 
 Complete desktop/phone browser review, then add personal authentication, PWA installation, hosted usage measurements, backups with tested recovery, and deployment rollback before public access or migration of personal data. AI, reporting, email, and paid services remain inactive.
+
+## Priorities and deliberate completion (20 October 2026)
+
+Migration 0004 adds Urgent, High, Medium and Low, defaulting existing tasks to Medium. Priority is editable at capture and in details; server-side filters apply before pagination in Today, Tasks and Trash. Cursors bind priority and workspace as well as the other filters. Old creation payloads remain compatible with retries using the default priority.
+
+An optional prerequisite picker searches all of your saved tasks through bounded server-side pages; it is not restricted to the current visible list. Selecting no prerequisite leaves a task independent. The database rejects missing/cross-workspace prerequisites, cycles, and a new completion while the prerequisite is unfinished. Completing the prerequisite enables completion; removing the relationship makes the task independent. Reopening an already completed prerequisite does not rewrite historical child completions. Deleting a prerequisite unlinks its dependents atomically, as before.
+
+Clicking Complete opens a native confirmation dialog, initially focused on Keep working, with Escape cancellation. Choosing Done through the details form uses the same confirmation. Cancellation does not write anything. Reopening a task remains a direct action. Every task row outside Trash, including completed tasks, has a labeled Delete control. Deletion remains reversible through Undo and Trash.

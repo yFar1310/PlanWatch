@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { ArrowRight, Trash2 } from '@lucide/vue';
-import type { Task } from '../shared/tasks';
+import { priorities, type Task } from '../shared/tasks';
+import DependencyPicker from './DependencyPicker.vue';
 import { nextDay } from '../shared/calendar';
 import { clearDraft, drafts, fromTask, storageAvailable, type TaskDraft } from './drafts';
 
 const props = defineProps<{ task: Task; disabled: boolean; canSave: boolean; today: string }>();
-const emit = defineEmits<{ save: [draft: TaskDraft]; delete: []; close: [] }>();
+const emit = defineEmits<{ save: [draft: TaskDraft]; delete: []; close: []; failure: [problem: unknown] }>();
 const draft = ref<TaskDraft>({ ...(drafts.value[props.task.id] ?? fromTask(props.task)) });
 const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(fromTask(props.task)));
 const stale = computed(() => draft.value.version !== props.task.version);
@@ -34,10 +35,12 @@ function useSaved() { draft.value = fromTask(props.task); clearDraft(props.task.
         <button type="button" class="date-chip" @click="draft.plannedDate = ''">No date</button>
       </div>
       <div class="detail-grid">
+        <label>Priority<select v-model="draft.priority"><option v-for="priority in priorities" :key="priority" :value="priority">{{ priority === 'medium' ? 'Medium' : priority.charAt(0).toUpperCase() + priority.slice(1) }}</option></select></label>
         <label>Status<select v-model="draft.status"><option value="todo">To do</option><option value="doing">In progress</option><option value="done">Done</option></select></label>
         <label>Estimate <span>minutes</span><input v-model="draft.estimate" type="number" min="1" step="1" placeholder="—" /></label>
         <label>Time spent <span>minutes</span><input v-model="draft.actual" type="number" min="0" step="1" placeholder="—" /></label>
       </div>
+      <DependencyPicker v-model="draft.dependsOn" :exclude-id="task.id" :disabled="disabled || !canSave" @failure="emit('failure', $event)" />
       <p class="draft-note">{{ dirty ? (storageAvailable ? 'Unsaved draft kept on this device.' : 'Draft kept while this page stays open. Browser storage is unavailable.') : 'Changes are saved when you choose Save changes.' }}</p>
       <div class="detail-actions">
         <button type="button" class="delete-button" :disabled="!canSave" @click="emit('delete')"><Trash2 :size="16" />Delete</button>

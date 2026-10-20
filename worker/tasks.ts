@@ -11,6 +11,7 @@ const taskFields = z.object({
   title: z.string().trim().min(1, 'Give the task a title.').max(200),
   notes: z.string().trim().max(5000).nullable(),
   status: z.enum(['todo', 'doing', 'done']),
+  priority: z.enum(['urgent', 'high', 'medium', 'low']),
   estimateMinutes: z.number().int().positive().nullable(),
   actualMinutes: z.number().int().nonnegative().nullable(),
   dependsOn: z.uuid().nullable(),
@@ -24,7 +25,9 @@ export const patchSchema = taskFields.partial().extend({ version: z.number().int
 export const versionSchema = z.object({ version: z.number().int().positive() }).strict();
 export const idSchema = z.uuid();
 
-const columns = `id, title, notes, status, estimate_minutes AS estimateMinutes,
+const columns = `id, title, notes, status, priority,
+  (SELECT title FROM tasks dependency WHERE dependency.id=tasks.depends_on AND dependency.owner_id=tasks.owner_id AND dependency.deleted_at IS NULL) AS dependencyTitle,
+  (SELECT status FROM tasks dependency WHERE dependency.id=tasks.depends_on AND dependency.owner_id=tasks.owner_id AND dependency.deleted_at IS NULL) AS dependencyStatus, estimate_minutes AS estimateMinutes,
   actual_minutes AS actualMinutes, depends_on AS dependsOn, created_at AS createdAt,
   updated_at AS updatedAt, completed_at AS completedAt, deleted_at AS deletedAt, planned_date AS plannedDate, version`;
 
@@ -41,10 +44,12 @@ export async function listTasks(db: D1Database, owner: string, query: URLSearchP
   const status = z.enum(['open', 'done', 'all']).parse(query.get('status') ?? 'all');
   const search = z.string().trim().max(200).parse(query.get('q') ?? '');
   const day = view === 'today' ? calendarDay.parse(query.get('day')) : '';
-  const scope = JSON.stringify([view, status, search, day]);
+  const priority = z.enum(['all', 'urgent', 'high', 'medium', 'low']).parse(query.get('priority') ?? 'all');
+  const scope = JSON.stringify([owner, view, status, search, day, priority]);
   const sortColumn = view === 'trash' ? 'deleted_at' : 'created_at';
   const where = ['owner_id=?', view === 'trash' ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL'];
   const bindings: (string | number)[] = [owner];
+  if (priority !== 'all') { where.push('priority=?'); bindings.push(priority); }
   if (view === 'today') {
     where.push("status <> 'done'", 'planned_date <= ?');
     bindings.push(day);
@@ -72,24 +77,24 @@ export async function listTasks(db: D1Database, owner: string, query: URLSearchP
 
 export async function createTask(db: D1Database, owner: string, key: string, input: z.infer<typeof createSchema>) {
   const task = {
-    title: input.title, notes: input.notes ?? null, status: input.status ?? 'todo',
+    title: input.title, notes: input.notes ?? null, status: input.status ?? 'todo', priority: input.priority ?? 'medium',
     estimateMinutes: input.estimateMinutes ?? null, actualMinutes: input.actualMinutes ?? null, dependsOn: input.dependsOn ?? null,
     plannedDate: input.plannedDate ?? null,
   };
   const payload = JSON.stringify(task);
   const now = Date.now();
   const result = await db.prepare(`INSERT INTO tasks
-    (id, owner_id, title, notes, status, estimate_minutes, actual_minutes, depends_on, planned_date, created_at, updated_at, completed_at, creation_key, creation_payload)
-    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    (id, owner_id, title, notes, status, estimate_minutes, actual_minutes, depends_on, planned_date, priority, created_at, updated_at, completed_at, creation_key, creation_payload)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     WHERE NOT EXISTS (SELECT 1 FROM tasks WHERE owner_id=? AND creation_key=?)
     ON CONFLICT(owner_id, creation_key) DO NOTHING`)
     .bind(crypto.randomUUID(), owner, task.title, task.notes, task.status, task.estimateMinutes, task.actualMinutes,
-      task.dependsOn, task.plannedDate, now, now, task.status === 'done' ? now : null, key, payload, owner, key).run();
+      task.dependsOn, task.plannedDate, task.priority, now, now, task.status === 'done' ? now : null, key, payload, owner, key).run();
   const saved = await db.prepare(`SELECT ${columns}, creation_payload AS creationPayload FROM tasks WHERE owner_id=? AND creation_key=?`)
     .bind(owner, key).first<Task & { creationPayload: string }>();
   if (!saved) throw new Error('Created task could not be read.');
   const original = JSON.parse(saved.creationPayload) as Partial<typeof task>;
-  if ((Object.keys(task) as (keyof typeof task)[]).some(field => (original[field] ?? null) !== task[field])) {
+  if ((Object.keys(task) as (keyof typeof task)[]).some(field => (original[field] ?? (field === 'priority' ? 'medium' : null)) !== task[field])) {
     throw new Problem('idempotency_conflict', 'This save key was already used for a different task. Refresh before trying again.', 409);
   }
   const { creationPayload: _, ...item } = saved;
@@ -101,9 +106,9 @@ export async function updateTask(db: D1Database, owner: string, id: string, patc
   const after = { ...before, ...patch };
   const completedAt = after.status === 'done' ? before.completedAt ?? Date.now() : null;
   const result = await db.prepare(`UPDATE tasks SET title=?, notes=?, status=?, estimate_minutes=?, actual_minutes=?,
-    depends_on=?, planned_date=?, completed_at=?, updated_at=?, version=version+1 WHERE owner_id=? AND id=? AND version=? AND deleted_at IS NULL`)
+    depends_on=?, planned_date=?, priority=?, completed_at=?, updated_at=?, version=version+1 WHERE owner_id=? AND id=? AND version=? AND deleted_at IS NULL`)
     .bind(after.title, after.notes, after.status, after.estimateMinutes, after.actualMinutes, after.dependsOn,
-      after.plannedDate, completedAt, Date.now(), owner, id, patch.version).run();
+      after.plannedDate, after.priority, completedAt, Date.now(), owner, id, patch.version).run();
   if (!result.meta.changes) throw new Problem('version_conflict', 'This task changed elsewhere. Refresh it before saving again.', 409);
   return getTask(db, owner, id);
 }

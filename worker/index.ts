@@ -1,10 +1,12 @@
 import { Hono } from 'hono';
 import { ZodError, z } from 'zod';
 import { createSchema, patchSchema, versionSchema, idSchema, Problem, listTasks, getTask, createTask, updateTask, setDeleted } from './tasks';
-import { authenticate, AuthError, type AuthBindings, type Session } from './auth';
+import { authenticate, AuthError, type AuthBindings, type Session, type Identity } from './auth';
+
+import { resolveWorkspace, requireAdmin, acceptInvitation, acceptSchema, createInvitation, invitationSchema, revokeInvitation, setMemberStatus, memberStatusSchema, recordActivity, activitySchema, dashboard } from './workspaces';
 
 export interface Bindings extends AuthBindings { DB: D1Database }
-const app = new Hono<{ Bindings: Bindings; Variables: { session: Session } }>();
+const app = new Hono<{ Bindings: Bindings; Variables: { session: Session; identity: Identity } }>();
 
 // The Pages frontend talks directly to the Worker. Preflight never reads D1 or requires a token.
 app.use('/api/*', async (c, next) => {
@@ -30,11 +32,11 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 
-// Local bypass is loopback-only. Hosted requests require a verified Clerk session for the pinned owner.
+// Local bypass is loopback-only. Hosted requests require a verified Clerk session before workspace admission.
 app.use('/api/*', async (c, next) => {
   c.header('Cache-Control', 'private, no-store');
   const session = await authenticate(c.req.raw, c.env);
-  c.set('session', session);
+  c.set('identity', session);
   if (!['GET', 'HEAD'].includes(c.req.method)) {
     const origin = c.req.header('Origin');
     if (session.mode !== 'local' && !origin) return c.json({ error: 'invalid_origin', message: 'Use the app to make this change.' }, 403);
@@ -49,13 +51,32 @@ async function body<T>(c: { req: { json(): Promise<unknown> } }, schema: z.ZodTy
   return schema.parse(input);
 }
 
+// Admission requires a signed identity, but not an existing workspace.
+app.post('/api/invitations/accept', async c => {
+  const identity = c.get('identity');
+  if (identity.userId === c.env.CLERK_OWNER_USER_ID?.trim()) {
+    await resolveWorkspace(c.env.DB, identity, c.env);
+    throw new Problem('already_member', 'The administrator already has a private workspace.', 409);
+  }
+  return c.json(await acceptInvitation(c.env.DB, identity, await body(c, acceptSchema)), 201);
+});
+app.use('/api/*', async (c, next) => {
+  c.set('session', await resolveWorkspace(c.env.DB, c.get('identity'), c.env));
+  await next();
+});
+app.use('/api/admin/*', async (c, next) => { requireAdmin(c.get('session')); await next(); });
+app.get('/api/admin', async c => c.json(await dashboard(c.env.DB, c.get('session'), new URL(c.req.url).searchParams)));
+app.post('/api/admin/invitations', async c => c.json(await createInvitation(c.env.DB, c.get('session'), (await body(c, invitationSchema)).label, c.env.APP_ORIGIN!), 201));
+app.delete('/api/admin/invitations/:id', async c => c.json(await revokeInvitation(c.env.DB, c.get('session'), idSchema.parse(c.req.param('id')))));
+app.patch('/api/admin/users/:id', async c => c.json(await setMemberStatus(c.env.DB, c.get('session'), z.union([z.literal('personal'), idSchema]).parse(c.req.param('id')), await body(c, memberStatusSchema))));
+app.post('/api/activity', async c => c.json(await recordActivity(c.env.DB, c.get('session'), (await body(c, activitySchema)).active)));
 app.get('/api/health', async (c) => {
-  await c.env.DB.prepare('SELECT 1 FROM tasks LIMIT 1').all();
+  await c.env.DB.prepare('SELECT 1 FROM tasks WHERE owner_id=? LIMIT 1').bind(c.get('session').ownerId).all();
   return c.json({ ok: true });
 });
 app.get('/api/session', (c) => {
-  const { mode, email, expiresAt } = c.get('session');
-  return c.json({ mode, email, expiresAt });
+  const { mode, email, expiresAt, workspaceId, displayName, canAdmin } = c.get('session');
+  return c.json({ mode, email, expiresAt, workspaceId, displayName, canAdmin });
 });
 app.get('/api/tasks', async (c) => c.json(await listTasks(c.env.DB, c.get('session').ownerId, new URL(c.req.url).searchParams)));
 app.get('/api/tasks/:id', async (c) => c.json({ task: await getTask(c.env.DB, c.get('session').ownerId, idSchema.parse(c.req.param('id'))) }));
@@ -79,6 +100,7 @@ app.onError((error, c) => {
   if (error instanceof Problem) return c.json({ error: error.code, message: error.message }, error.status);
   if (error instanceof ZodError) return c.json({ error: 'validation', message: error.issues[0]?.message ?? 'Check the task fields.' }, 400);
   const detail = `${error.message} ${error.cause instanceof Error ? error.cause.message : ''}`;
+  if (detail.includes('dependency_incomplete')) return c.json({ error: 'dependency_incomplete', message: 'Complete the prerequisite first, or remove this dependency before finishing the task.' }, 409);
   if (detail.includes('dependency_cycle')) return c.json({ error: 'dependency_cycle', message: 'This dependency would create a loop. Choose another task.' }, 400);
   if (detail.includes('dependency_not_found')) return c.json({ error: 'dependency_not_found', message: 'That dependency is unavailable.' }, 400);
   console.error('Request failed', { name: error.name, message: error.message });

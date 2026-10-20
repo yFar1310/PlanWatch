@@ -4,9 +4,9 @@ Updated 20 October 2026. PlanWatch uses a Vue frontend on Cloudflare Pages, a se
 
 ## Authentication and ownership
 
-The official Vue SDK displays sign-in and obtains a current session token for each API call. Requests use explicit Bearer headers; the client does not persist tokens itself, send cross-origin cookies, follow login redirects, or replay writes automatically. Account/session changes invalidate pending responses and unmount private content. Device-local drafts survive sign-out. Short-lived tokens are renewed without interrupting editing.
+The official Vue SDK displays sign-in and obtains a current session token for each API call. Requests use explicit Bearer headers; the client does not persist tokens itself, send cross-origin cookies, follow login redirects, or replay writes automatically. Account/session changes invalidate pending responses and unmount private content. Device-local drafts survive sign-out in workspace-scoped storage; private in-memory drafts are cleared. Short-lived tokens are renewed without interrupting editing.
 
-The Worker verifies signatures using jose and the instance's public JWKS, cached per isolate with a bounded retrieval timeout. No Clerk secret key, per-request user lookup, session database table, paid feature, or custom email claim is needed.
+The Worker verifies signatures using jose and the instance's public JWKS, cached per isolate with a bounded retrieval timeout. No Clerk secret key, per-request Clerk user lookup, paid feature, or custom email claim is needed. D1 holds workspace admission and observed activity sessions.
 
 Hosted settings in ignored `wrangler.preview.jsonc`:
 
@@ -16,15 +16,15 @@ Hosted settings in ignored `wrangler.preview.jsonc`:
 - `APP_ORIGIN`: the exact permitted Pages frontend origin.
 - `API_ORIGIN`: the exact Worker origin; defaults to APP_ORIGIN for a same-origin deployment.
 
-Verification requires RS256, the expected issuer, version 2 claims, valid user/session IDs, issued/not-before/expiry timestamps, and azp equal to APP_ORIGIN. Pending and impersonated sessions are rejected. The owner is checked before D1 access. Cookies, old Access assertions, identity headers, API keys, and query-string tokens are not accepted. Tokens/provider errors are never logged.
+Verification requires RS256, the expected issuer, version 2 claims, valid user/session IDs, issued/not-before/expiry timestamps, and azp equal to APP_ORIGIN. Pending and impersonated sessions are rejected. Active membership is checked in D1 after identity verification; the configured owner is the sole administrator. Cookies, old Access assertions, identity headers, API keys, and query-string tokens are not accepted. Tokens/provider errors are never logged.
 
-The hosted database owner remains `personal`; changing login providers does not rename it. Loopback development with LOCAL_DEV=true retains a separate `local-preview` owner. That flag cannot bypass authentication on public hostnames. No v1 or prototype records are imported automatically.
+The administrator’s hosted database owner remains `personal`; invited users receive separate UUID workspaces. See [private workspaces](PRIVATE-WORKSPACES.md). Changing login providers does not rename the administrator workspace. Loopback development with LOCAL_DEV=true retains a separate `local-preview` owner. That flag cannot bypass authentication on public hostnames. No v1 or prototype records are imported automatically.
 
-Signature verification does not remotely revoke an issued JWT before expiry. The UI clears immediately on sign-out; server validity remains bounded by token lifetime. Real-device renewal/revocation checks remain open. References: [Vue SDK](https://clerk.com/docs/vue/getting-started/quickstart), [session claims](https://clerk.com/docs/guides/sessions/session-tokens), [verification](https://clerk.com/docs/guides/sessions/manual-jwt-verification).
+Signature verification does not remotely revoke an issued JWT before expiry. The UI clears immediately on sign-out; server validity remains bounded by token lifetime. PlanWatch bans are checked against D1 on every request, independently of JWT expiry. Real-device renewal/sign-out checks remain open. References: [Vue SDK](https://clerk.com/docs/vue/getting-started/quickstart), [session claims](https://clerk.com/docs/guides/sessions/session-tokens), [verification](https://clerk.com/docs/guides/sessions/manual-jwt-verification).
 
 ## Clerk setup and budget
 
-Use **Hobby**, without adding a payment card or paid add-ons. Configure Google sign-in. After creating the owner, use Invite-only registration if available on the selected plan. The API's owner check is independent. Clerk's paid production email Allowlist is not used. See [pricing](https://clerk.com/pricing) and [access restrictions](https://clerk.com/docs/guides/secure/restricting-access).
+Use **Hobby**, without adding a payment card or paid add-ons. Configure Google sign-in. PlanWatch uses its own invitation admission independently of Clerk registration. Keep Clerk sign-up available to invited friends; a new Clerk identity alone grants no task access. Clerk's paid production email Allowlist is not used. See [pricing](https://clerk.com/pricing) and [access restrictions](https://clerk.com/docs/guides/secure/restricting-access).
 
 The supplied pk_test key belongs to a development instance. It supports preview testing, not production acceptance. Clerk production currently requires an owned domain, DNS configuration, and dedicated Google OAuth credentials. The owner does not yet have a PlanWatch domain; no domain purchase or paid upgrade is enabled. See [production prerequisites](https://clerk.com/docs/guides/development/deployment/production).
 
@@ -37,7 +37,7 @@ Dedicated preview targets:
 - Worker and D1 names: planwatch-v2-preview.
 - Pages production branch: PlanWatch2.0, in this separate preview project.
 
-The existing Pages project planwatch and v1 data are preserved. Both migrations are applied to the dedicated D1 database; the earlier remote check found zero tasks, zero events, and five required triggers. Authentication needs no schema migration.
+The existing Pages project planwatch and v1 data are preserved. The dedicated D1 database uses numbered migrations. Migration 0003 adds invited workspaces and administration; 0004 adds priorities and prerequisite-completion checks.
 
 Copy `.env.example` to an ignored environment file and set `VITE_CLERK_PUBLISHABLE_KEY`. Vue/Vite uses this prefix, not NEXT_PUBLIC_. Set `VITE_API_BASE_URL=https://YOUR_WORKER_HOSTNAME/api` in ignored `.env.production.local` for Pages builds; local development keeps /api. These are public build settings. Never put secrets in VITE_ variables.
 
@@ -73,10 +73,10 @@ npm run db:backup:local
 npm run db:verify-backup -- /absolute/path/to/.wrangler/backups/planwatch-....sql
 ```
 
-Backups and checksum/size manifests are private ignored files. Verification restores into an isolated copy, compares an exact re-export, runs D1 quick_check/foreign_key_check, checks triggers, and tests history, cycles, and deletion/unlinking. An actual local restore passed without overwriting the working database. Hosted recovery and rollback still need a drill before personal-data import. See [D1 recovery](https://developers.cloudflare.com/d1/reference/time-travel/) and [export/import](https://developers.cloudflare.com/d1/best-practices/import-export-data/).
+Backups and checksum/size manifests are private ignored files. Verification restores into an isolated copy, compares a re-export with line endings normalized, runs D1 quick_check/foreign_key_check, checks triggers, and tests history, cycles, and deletion/unlinking. An actual local restore passed without overwriting the working database. Before migrations 0003/0004, a remote export containing 3 tasks and 10 events passed the isolated local restore checks; destructive remote restore and rollback remain untested. See [D1 recovery](https://developers.cloudflare.com/d1/reference/time-travel/) and [export/import](https://developers.cloudflare.com/d1/best-practices/import-export-data/).
 
 ## Verification and acceptance
 
-Type checks, both builds, **45 Workers integration tests, 12 Vue component tests, and 21 client/service-worker/asset/deployment tests pass**. Coverage includes RSA signatures, invalid/expired/future/wrong-issuer/wrong-origin tokens, other users, pending/impersonated sessions, Origin/CORS/preflight checks, owner isolation, key outages, renewal, delayed responses, sign-out failures, draft retention, cache isolation, and icons.
+Type checks, both builds, **the Workers integration, Vue component, and client/service-worker/asset/deployment suites pass**. Coverage includes RSA signatures, invalid/expired/future/wrong-issuer/wrong-origin tokens, other users, pending/impersonated sessions, Origin/CORS/preflight checks, workspace isolation, invitation admission, administration, bans, usage estimates, key outages, renewal, delayed responses, sign-out failures, draft retention, cache isolation, and icons.
 
 Component tests use jsdom with mocked Clerk state; they do not verify actual Google OAuth or browser rendering. The browser tool remains unavailable during setup. Real-device sign-in/renewal/logout, installation, accessibility/visual review, hosted CPU/cost measurements, recovery, and rollback remain open. AI, R2, reports, email sending, and paid upgrades are not activated.

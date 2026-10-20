@@ -1,21 +1,27 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { CalendarDays, Check, ChevronDown, CircleCheck, Download, ListTodo, LoaderCircle, LogOut, Moon, Plus, RefreshCw, RotateCcw, Search, Sun, Trash2, WifiOff, X } from '@lucide/vue';
-import type { Task, TaskPage } from '../shared/tasks';
+import { CalendarDays, Check, ChevronDown, CircleCheck, Download, ListTodo, LoaderCircle, LogOut, Moon, Plus, RefreshCw, RotateCcw, Search, Shield, Sun, Trash2, WifiOff, X } from '@lucide/vue';
+import { priorities, type TaskPriority, type Task, type TaskPage } from '../shared/tasks';
 import type { SessionInfo } from '../shared/session';
 import { currentDay, formatDay, nextDay, TIME_ZONE } from '../shared/calendar';
 import { api, ApiError } from './api';
-import { capture, clearDraft, drafts, storageAvailable, type TaskDraft } from './drafts';
+import { activateDrafts, deactivateDrafts, capture, clearDraft, drafts, storageAvailable, type TaskDraft } from './drafts';
 import { useTheme } from './theme';
+import ConfirmDialog from './ConfirmDialog.vue';
+import DependencyPicker from './DependencyPicker.vue';
+import AdminPanel from './AdminPanel.vue';
+import { pendingInvitation, invitationCode, clearInvitation } from './invitations';
 import TaskEditor from './TaskEditor.vue';
 import { usePwa } from './pwa';
 
 defineProps<{ accountId?: string }>();
 const emit = defineEmits<{ signOut: []; signIn: [] }>();
-type View = 'today' | 'tasks' | 'trash';
+type View = 'today' | 'tasks' | 'trash' | 'admin';
 const view = ref<View>('today');
 const status = ref<'open' | 'done' | 'all'>('open');
 const search = ref('');
+const priorityFilter = ref<TaskPriority | 'all'>('all');
+const completion = ref<{ task: Task; draft?: TaskDraft } | null>(null);
 const tasks = ref<Task[]>([]);
 const cursor = ref<string | null>(null);
 const loading = ref(true);
@@ -26,7 +32,11 @@ const editing = ref<string | null>(null);
 const lastDeleted = ref<Task | null>(null);
 const online = ref(navigator.onLine);
 const session = ref<SessionInfo | null>(null);
-const authState = ref<'loading' | 'ready' | 'signin' | 'unavailable'>('loading');
+const authState = ref<'loading' | 'ready' | 'signin' | 'unavailable' | 'invite' | 'banned'>('loading');
+const inviteInput = ref(pendingInvitation.value);
+const displayName = ref('');
+const usageAcknowledged = ref(false);
+const joining = ref(false);
 const setupRequired = ref(false);
 const lastSynced = ref<number | null>(null);
 const canWrite = computed(() => online.value && authState.value === 'ready');
@@ -44,11 +54,11 @@ let disposed = false;
 let checkingSession = false;
 
 async function load(append = false) {
-  if (disposed || authState.value !== 'ready') return;
+  if (disposed || authState.value !== 'ready' || view.value === 'admin') return;
   const request = ++sequence;
   loading.value = true;
   if (!online.value) { loading.value = false; throw new Error('Reconnect to refresh your tasks.'); }
-  const query = new URLSearchParams({ view: view.value, status: view.value === 'tasks' ? status.value : 'all', q: search.value.trim() });
+  const query = new URLSearchParams({ view: view.value, status: view.value === 'tasks' ? status.value : 'all', q: search.value.trim(), priority: priorityFilter.value });
   if (view.value === 'today') query.set('day', today.value);
   if (append && cursor.value) query.set('cursor', cursor.value);
   try {
@@ -61,13 +71,14 @@ async function load(append = false) {
     if (request === sequence && !disposed) throw problem;
   } finally { if (request === sequence && !disposed) loading.value = false; }
 }
-function clearPrivateView() { ++sequence; loading.value = false; tasks.value = []; cursor.value = null; editing.value = null; lastDeleted.value = null; lastSynced.value = null; }
+function clearPrivateView() { completion.value = null; ++sequence; loading.value = false; tasks.value = []; cursor.value = null; editing.value = null; lastDeleted.value = null; lastSynced.value = null; }
 function showError(problem: unknown) {
   if (disposed) return;
   error.value = problem instanceof Error ? problem.message : 'Something went wrong. Please try again.';
   setupRequired.value = problem instanceof ApiError && problem.code === 'setup_required';
   if (problem instanceof ApiError && [401, 403].includes(problem.status)) {
-    authState.value = 'signin';
+    authState.value = problem.code === 'invitation_required' ? 'invite' : problem.code === 'account_banned' ? 'banned' : 'signin';
+    deactivateDrafts();
     session.value = null;
     clearPrivateView();
   }
@@ -78,18 +89,52 @@ async function checkSession() {
   try {
     const verified = await api<SessionInfo>('/session');
     if (disposed) return false;
+    if (!verified.workspaceId) throw new Error('Workspace verification failed. Reload to try again.');
+    activateDrafts(verified.workspaceId, verified.canAdmin || verified.mode === 'local');
     session.value = verified;
+    clearInvitation();
+    if (view.value === 'admin' && !verified.canAdmin) view.value = 'today';
     setupRequired.value = false;
     authState.value = 'ready';
+    void activity();
     return true;
   } catch (problem) {
     if (disposed) return false;
     authState.value = 'unavailable';
+    session.value = null;
+    deactivateDrafts();
     clearPrivateView();
     showError(problem);
     return false;
   } finally { checkingSession = false; }
 }
+async function join() {
+  if (joining.value || !usageAcknowledged.value) return;
+  const code = invitationCode(inviteInput.value);
+  if (!code) { error.value = 'Paste a complete invitation link or a valid invitation code.'; return; }
+  joining.value = true; error.value = '';
+  try {
+    await api('/invitations/accept', 'POST', { code, displayName: displayName.value.trim(), usageAcknowledged: true });
+    if (disposed) return;
+    clearInvitation(); inviteInput.value = '';
+    if (await checkSession()) await load();
+  } catch (problem) {
+    if (problem instanceof ApiError && problem.code === 'already_member') { if (await checkSession()) await load(); }
+    else showError(problem);
+  } finally { joining.value = false; }
+}
+let lastInteraction = Date.now();
+let sendingActivity = false;
+function interacted() { lastInteraction = Date.now(); }
+async function activity() {
+  if (sendingActivity || disposed || !online.value || authState.value !== 'ready' || session.value?.mode !== 'clerk') return;
+  sendingActivity = true;
+  try { await api('/activity', 'POST', { active: document.visibilityState === 'visible' && Date.now() - lastInteraction < 60_000 }); }
+  catch (problem) { if (problem instanceof ApiError && [401, 403].includes(problem.status)) showError(problem); }
+  finally { sendingActivity = false; }
+}
+function visibilityChanged() { tick(); void activity(); }
+
 async function reload() {
   clearTimeout(reloadTimer);
   error.value = '';
@@ -97,7 +142,7 @@ async function reload() {
   if (authState.value !== 'ready' && !await checkSession()) { loading.value = false; return; }
   try { await load(); } catch (problem) { showError(problem); }
 }
-watch([view, status, search, today], (values, old) => {
+watch([view, status, search, today, priorityFilter], (values, old) => {
   ++sequence;
   clearTimeout(reloadTimer);
   loading.value = true;
@@ -133,17 +178,34 @@ async function add() {
   if (!title) return;
   await run(async () => {
     const plannedDate = capture.value.plannedDate || null;
-    const payload = JSON.stringify({ title, plannedDate });
-    if (capture.value.payload !== payload || !capture.value.key) {
+    const payload = JSON.stringify({ title, plannedDate, priority: capture.value.priority, dependsOn: capture.value.dependsOn });
+    let previousPayload = capture.value.payload;
+    try {
+      const previous = JSON.parse(previousPayload ?? 'null');
+      if (previous && typeof previous === 'object') previousPayload = JSON.stringify({ title: previous.title, plannedDate: previous.plannedDate ?? null, priority: previous.priority ?? 'medium', dependsOn: previous.dependsOn ?? null });
+    } catch { /* An unreadable draft receives a new request key. */ }
+    if (previousPayload !== payload || !capture.value.key) {
       capture.value = { ...capture.value, key: crypto.randomUUID(), payload };
     }
-    await api<{ task: Task }>('/tasks', 'POST', { title, plannedDate }, capture.value.key!);
-    capture.value = { title: '', plannedDate: capture.value.plannedDate, key: null, payload: null };
+    capture.value.payload = payload;
+    await api<{ task: Task }>('/tasks', 'POST', { title, plannedDate, priority: capture.value.priority, dependsOn: capture.value.dependsOn }, capture.value.key!);
+    capture.value = { title: '', plannedDate: capture.value.plannedDate, key: null, payload: null, priority: 'medium', dependsOn: null };
     notice.value = plannedDate ? `Added for ${formatDay(plannedDate)}. Find all your tasks in Tasks.` : 'Added without a date. Find it in Tasks.';
     await load();
   }, true);
   await nextTick();
   if (!error.value) titleInput.value?.focus();
+}
+function requestToggle(task: Task) {
+  if (task.status === 'done') return toggle(task);
+  completion.value = { task };
+}
+async function confirmCompletion() {
+  const pending = completion.value;
+  if (!pending) return;
+  if (pending.draft) await save(pending.task, pending.draft, true);
+  else await toggle(pending.task);
+  completion.value = null;
 }
 function toggle(task: Task) {
   return run(async () => {
@@ -153,11 +215,12 @@ function toggle(task: Task) {
     await load();
   }).then(() => { if (!error.value) return focusList(); });
 }
-function save(task: Task, draft: TaskDraft) {
+function save(task: Task, draft: TaskDraft, confirmed = false) {
+  if (draft.status === 'done' && task.status !== 'done' && !confirmed) { completion.value = { task, draft }; return Promise.resolve(); }
   return run(async () => {
     await api(`/tasks/${task.id}`, 'PATCH', {
       version: draft.version, title: draft.title.trim(), notes: draft.notes.trim() || null,
-      status: draft.status, plannedDate: draft.plannedDate || null,
+      status: draft.status, priority: draft.priority, dependsOn: draft.dependsOn, plannedDate: draft.plannedDate || null,
       estimateMinutes: draft.estimate === '' ? null : Number(draft.estimate),
       actualMinutes: draft.actual === '' ? null : Number(draft.actual),
     });
@@ -186,10 +249,12 @@ function restore(task: Task) {
   }).then(() => { if (!error.value) return focusList(); });
 }
 function tick() {
+  void activity();
   // Clerk session tokens are short-lived: obtain a renewed token, not a forced logout every minute.
   if (session.value?.expiresAt && session.value.expiresAt <= Date.now() + 30_000) {
     if (online.value) void checkSession();
     else if (session.value.expiresAt <= Date.now()) {
+      deactivateDrafts();
       authState.value = 'signin';
       session.value = null;
       clearPrivateView();
@@ -212,7 +277,9 @@ function returnedToPage(event: PageTransitionEvent) {
 onMounted(() => {
   void reload();
   clockTimer = setInterval(tick, 30_000);
-  document.addEventListener('visibilitychange', tick);
+  document.addEventListener('visibilitychange', visibilityChanged);
+  document.addEventListener('pointerdown', interacted, { passive: true });
+  document.addEventListener('keydown', interacted);
   window.addEventListener('online', wentOnline);
   window.addEventListener('offline', wentOffline);
   window.addEventListener('pageshow', returnedToPage);
@@ -222,7 +289,10 @@ onUnmounted(() => {
   ++sequence;
   clearTimeout(reloadTimer);
   clearInterval(clockTimer);
-  document.removeEventListener('visibilitychange', tick);
+  document.removeEventListener('visibilitychange', visibilityChanged);
+  document.removeEventListener('pointerdown', interacted);
+  document.removeEventListener('keydown', interacted);
+  deactivateDrafts();
   window.removeEventListener('online', wentOnline);
   window.removeEventListener('offline', wentOffline);
   window.removeEventListener('pageshow', returnedToPage);
@@ -230,12 +300,14 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <ConfirmDialog v-if="completion && authState === 'ready'" title="Done with this task?" :description="`Mark “${completion.task.title}” as complete? You can reopen it later.${completion.task.dependsOn && completion.task.dependencyStatus !== 'done' ? ' Its prerequisite must be completed first.' : ''}`" :busy="busy" @confirm="confirmCompletion" @cancel="completion = null" />
   <div class="app-shell">
     <aside class="sidebar">
       <a href="/" class="brand" aria-label="PlanWatch home"><span class="brand-icon"><Check :size="21" :stroke-width="3" /></span>PlanWatch<span class="version">2.0</span></a>
       <div class="workspace-label">YOUR SPACE</div>
       <nav class="workspace-nav" aria-label="Workspace">
         <button v-for="item in ([{ id: 'today', title: 'Today', icon: CalendarDays }, { id: 'tasks', title: 'Tasks', icon: ListTodo }, { id: 'trash', title: 'Trash', icon: Trash2 }] as const)" :key="item.id" :class="{ active: view === item.id }" :aria-current="view === item.id ? 'page' : undefined" :disabled="busy" @click="chooseView(item.id)"><component :is="item.icon" :size="19" />{{ item.title }}</button>
+        <button v-if="session?.canAdmin" :class="{ active: view === 'admin' }" :aria-current="view === 'admin' ? 'page' : undefined" :disabled="busy" @click="chooseView('admin')"><Shield :size="19" />Administration</button>
       </nav>
       <div class="sidebar-note"><span class="small-dot"></span> One step at a time<p>A little less to remember.<br>A little more room to focus.</p></div>
       <div class="preview-label">{{ accountId ? 'Private workspace' : 'Local preview' }}<span>Plan a little. Focus a little.</span></div>
@@ -247,13 +319,27 @@ onUnmounted(() => {
         <div class="topbar-actions">
           <span class="local-badge"><component v-if="!online" :is="WifiOff" :size="15" /><span v-else class="small-dot"></span>{{ !online ? 'Offline' : session?.mode === 'clerk' ? 'Private workspace' : 'On this computer' }}</span>
           <button v-if="canInstall" class="icon-button" type="button" aria-label="Install PlanWatch" title="Install PlanWatch" @click="install"><Download :size="19" /></button>
-          <button v-if="accountId" class="icon-button sign-out" type="button" :disabled="busy" aria-label="Sign out" title="Sign out" @click="clearPrivateView(); emit('signOut')"><LogOut :size="18" /></button>
+          <button v-if="accountId" class="icon-button sign-out" type="button" :disabled="busy" aria-label="Sign out" title="Sign out" @click="clearPrivateView(); deactivateDrafts(); emit('signOut')"><LogOut :size="18" /></button>
           <button class="theme-toggle" type="button" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme">
             <component :is="isDark ? Sun : Moon" :key="isDark ? 'sun' : 'moon'" :size="20" aria-hidden="true" />
           </button>
         </div>
       </header>
       <div class="content">
+        <section v-if="authState === 'invite' || authState === 'banned'" class="admin-card enrollment" aria-labelledby="access-title">
+          <h1 id="access-title">{{ authState === 'banned' ? 'Access paused' : 'Your own private workspace' }}</h1>
+          <p v-if="authState === 'banned'">Your account has been banned. Contact the administrator to restore access. Your tasks are preserved.</p>
+          <form v-else class="enrollment-form" @submit.prevent="join">
+            <p>Ask the administrator for an invitation, then create your personal space.</p>
+            <label>Your display name<input v-model="displayName" required maxlength="80" autocomplete="nickname" :disabled="joining" /></label>
+            <label>Invitation link or code<input v-model="inviteInput" required autocomplete="off" spellcheck="false" :disabled="joining" /></label>
+            <label class="usage-consent"><input v-model="usageAcknowledged" type="checkbox" required :disabled="joining" /><span>I understand that my tasks stay private, and the administrator can see my display name, task counts, observed sessions and estimated active time.</span></label>
+            <button class="primary" :disabled="joining || !online || !usageAcknowledged || !displayName.trim() || !inviteInput.trim()">{{ joining ? 'Creating workspace…' : 'Accept invitation' }}</button>
+          </form>
+          <p v-if="error" class="error-message" role="alert">{{ error }}</p>
+        </section>
+        <AdminPanel v-else-if="view === 'admin' && session?.canAdmin && authState === 'ready'" @failure="showError" />
+        <template v-else>
         <div class="heading-row">
           <div><p class="eyebrow">{{ view === 'today' ? 'MAKE ROOM FOR WHAT MATTERS' : view === 'trash' ? 'NOTHING LOST IN A CLICK' : 'YOUR PLANS, YOUR PACE' }}</p><h1>{{ heading }}</h1><p class="intro">{{ description }}</p></div>
           <button class="icon-button refresh" aria-label="Refresh tasks" :disabled="busy || loading" @click="reload"><RefreshCw :size="18" :class="{ spin: loading }" /></button>
@@ -269,14 +355,16 @@ onUnmounted(() => {
         <template v-if="view !== 'trash' && authState === 'ready'">
           <form class="capture" @submit.prevent="add">
             <div class="capture-main"><Plus :size="22" aria-hidden="true" /><input ref="titleInput" v-model="capture.title" aria-label="New task title" placeholder="What would you like to do?" maxlength="200" required aria-describedby="capture-help" :disabled="busy" /><button class="primary" :disabled="!canWrite || !capture.title.trim() || busy" type="submit"><Plus :size="17" /><span>Add task</span></button></div>
+            <div class="capture-options"><label class="priority-select">Priority<select v-model="capture.priority" :disabled="busy"><option v-for="priority in priorities" :key="priority" :value="priority">{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</option></select></label><DependencyPicker v-model="capture.dependsOn" :disabled="busy || !canWrite" @failure="showError" /></div>
             <fieldset class="capture-schedule" :disabled="busy"><label class="capture-date"><CalendarDays :size="15" /><span class="sr-only">Planned day for new task, optional</span><input v-model="capture.plannedDate" type="date" min="0001-01-01" max="9999-12-31" /></label><button class="date-chip" type="button" @click="capture.plannedDate = today">Today</button><button class="date-chip" type="button" @click="capture.plannedDate = nextDay(today)">Tomorrow</button><button class="date-chip" type="button" @click="capture.plannedDate = ''">No date</button></fieldset>
           </form>
-          <p id="capture-help" class="capture-hint">Write a title, then tap Add task. Dates and details are optional.{{ !storageAvailable ? ' Drafts will last only while this page stays open.' : '' }}</p>
+          <p id="capture-help" class="capture-hint">Write a title, then tap Add task. Priority defaults to Medium. Dates and prerequisites are optional.{{ !storageAvailable ? ' Drafts will last only while this page stays open.' : '' }}</p>
         </template>
 
         <div v-if="error && authState !== 'signin'" role="alert" class="error-message">{{ error }} <button :disabled="busy || loading || !online" @click="reload">Refresh tasks</button></div>
         <div class="status-message" role="status" aria-live="polite"><span>{{ notice || (busy ? 'Saving…' : '') }}</span><button v-if="lastDeleted" class="undo-button" :disabled="!canWrite || busy || loading" @click="restore(lastDeleted)"><RotateCcw :size="15" />Undo last delete</button></div>
 
+        <label v-if="authState === 'ready'" class="priority-filter">Filter by priority<select v-model="priorityFilter" :disabled="busy"><option value="all">All priorities</option><option v-for="priority in priorities" :key="priority" :value="priority">{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</option></select></label>
         <div class="list-toolbar">
           <div v-if="view === 'tasks'" class="filters" aria-label="Filter tasks"><button v-for="option in (['open', 'done', 'all'] as const)" :key="option" :aria-pressed="status === option" :class="{ active: status === option }" :disabled="busy" @click="status = option">{{ option === 'open' ? 'Open' : option === 'done' ? 'Done' : 'All' }}</button></div>
           <h2 v-else class="section-label">{{ view === 'today' ? 'Your next steps' : 'Deleted tasks' }}</h2>
@@ -290,19 +378,21 @@ onUnmounted(() => {
           <article v-for="task in tasks" :key="task.id" class="task" :class="{ completed: task.status === 'done', expanded: editing === task.id }">
             <div class="task-row">
               <span v-if="view === 'trash'" class="trash-marker"><Trash2 :size="18" /></span>
-              <button v-else class="checkbox" :class="{ checked: task.status === 'done' }" :aria-label="`${task.status === 'done' ? 'Reopen' : 'Complete'} ${task.title}`" :disabled="!canWrite || busy || loading || editing === task.id || !!drafts[task.id]" @click="toggle(task)"><Check v-if="task.status === 'done'" :size="15" /></button>
+              <button v-else class="checkbox" :class="{ checked: task.status === 'done' }" :aria-label="`${task.status === 'done' ? 'Reopen' : 'Complete'} ${task.title}`" :disabled="!canWrite || busy || loading || editing === task.id || !!drafts[task.id]" @click="requestToggle(task)"><Check v-if="task.status === 'done'" :size="15" /></button>
               <component :is="view === 'trash' ? 'div' : 'button'" class="task-title" :aria-expanded="view === 'trash' ? undefined : editing === task.id" :disabled="view === 'trash' ? undefined : busy || loading" @click="view !== 'trash' && (editing = editing === task.id ? null : task.id)">
                 <span>{{ task.title }}</span>
-                <span class="task-meta"><span v-if="task.plannedDate" :class="{ overdue: task.status !== 'done' && task.plannedDate < today }">{{ task.status !== 'done' && task.plannedDate < today ? 'Overdue · ' : '' }}{{ task.plannedDate === today ? 'Today' : task.plannedDate === nextDay(today) ? 'Tomorrow' : formatDay(task.plannedDate) }}</span><span v-else>No date</span><span v-if="task.status === 'doing'" class="doing-dot">In progress</span><span v-if="task.estimateMinutes">{{ task.estimateMinutes }} min estimated</span><span v-if="drafts[task.id]">Unsaved draft</span><span v-else-if="task.notes">Has notes</span></span>
+                <span class="task-meta"><span class="priority-badge" :data-priority="task.priority || 'medium'">{{ task.priority || 'medium' }}</span><span v-if="task.dependsOn">{{ task.dependencyStatus === 'done' ? 'Prerequisite done' : 'Waiting for' }} · {{ task.dependencyTitle || 'prerequisite' }}</span><span v-if="task.plannedDate" :class="{ overdue: task.status !== 'done' && task.plannedDate < today }">{{ task.status !== 'done' && task.plannedDate < today ? 'Overdue · ' : '' }}{{ task.plannedDate === today ? 'Today' : task.plannedDate === nextDay(today) ? 'Tomorrow' : formatDay(task.plannedDate) }}</span><span v-else>No date</span><span v-if="task.status === 'doing'" class="doing-dot">In progress</span><span v-if="task.estimateMinutes">{{ task.estimateMinutes }} min estimated</span><span v-if="drafts[task.id]">Unsaved draft</span><span v-else-if="task.notes">Has notes</span></span>
               </component>
               <button v-if="view === 'trash'" class="restore-button secondary" :aria-label="`Restore ${task.title}`" :disabled="!canWrite || busy || loading" @click="restore(task)"><RotateCcw :size="16" />Restore</button>
-              <button v-else class="icon-button" :aria-label="`${editing === task.id ? 'Close details for' : 'Edit'} ${task.title}`" :aria-expanded="editing === task.id" :disabled="busy || loading" @click="editing = editing === task.id ? null : task.id"><ChevronDown :size="18" :class="{ flipped: editing === task.id }" /></button>
+              <button v-if="view !== 'trash'" class="icon-button task-delete" :aria-label="`Delete ${task.title}`" :disabled="!canWrite || busy || loading" @click="remove(task)"><Trash2 :size="17" /></button>
+              <button v-if="view !== 'trash'" class="icon-button" :aria-label="`${editing === task.id ? 'Close details for' : 'Edit'} ${task.title}`" :aria-expanded="editing === task.id" :disabled="busy || loading" @click="editing = editing === task.id ? null : task.id"><ChevronDown :size="18" :class="{ flipped: editing === task.id }" /></button>
             </div>
-            <TaskEditor v-if="editing === task.id && view !== 'trash'" :task="task" :disabled="busy || loading" :can-save="canWrite" :today="today" @save="save(task, $event)" @delete="remove(task)" @close="editing = null" />
+            <TaskEditor v-if="editing === task.id && view !== 'trash'" :task="task" :disabled="busy || loading" :can-save="canWrite" :today="today" @save="save(task, $event)" @failure="showError" @delete="remove(task)" @close="editing = null" />
           </article>
         </section>
         <div class="list-bottom"><span v-if="tasks.length">{{ tasks.length }} {{ tasks.length === 1 ? 'task' : 'tasks' }}{{ cursor ? ' loaded · more available' : '' }}</span><button v-if="cursor" class="secondary" :disabled="busy || loading" @click="run(() => load(true))">{{ loading ? 'Loading…' : 'Load more' }}</button></div>
         <footer><span class="small-dot"></span>{{ session?.mode === 'clerk' ? 'Saved privately in your workspace.' : accountId ? 'Your private workspace.' : 'Local development workspace.' }}<span v-if="lastSynced">Last refreshed {{ new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit' }).format(lastSynced) }} · {{ TIME_ZONE }}</span></footer>
+        </template>
       </div>
     </main>
   </div>

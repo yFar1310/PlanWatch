@@ -328,3 +328,57 @@ describe('task foundation in the real Workers runtime', () => {
     expect(found).toEqual([second.id, first.id, third.id]);
   });
 });
+
+describe('priorities and prerequisite completion', () => {
+  it('defaults old and new tasks to Medium and records priority changes in history', async () => {
+    const task = await add(); expect(task.priority).toBe('medium');
+    const changed = await api(`/tasks/${task.id}`,'PATCH',{version:task.version,priority:'urgent'});
+    expect(changed.status).toBe(200); expect(changed.body.task.priority).toBe('urgent');
+    const log=await events(task.id);
+    expect(JSON.parse(log[0].after_json as string).priority).toBe('medium');
+    expect(JSON.parse(log[1].before_json as string).priority).toBe('medium');
+    expect(JSON.parse(log[1].after_json as string).priority).toBe('urgent');
+    expect((await api('/tasks','POST',{title:'Invalid priority',priority:'critical'},crypto.randomUUID())).status).toBe(400);
+    await expect(db.prepare("UPDATE tasks SET priority='critical' WHERE id=?").bind(task.id).run()).rejects.toThrow();
+  });
+  it('filters priorities before pagination and binds the cursor to that priority', async () => {
+    const high=await add({priority:'high'});
+    await add({priority:'urgent'}); await add({priority:'urgent'});
+    for(let i=0;i<52;i++) await add({priority:'low'});
+    expect((await api('/tasks?priority=high')).body.items.map((t:any)=>t.id)).toEqual([high.id]);
+    const first=await api('/tasks?priority=urgent&limit=1');
+    expect(first.body.items[0].priority).toBe('urgent');
+    const second=await api('/tasks?priority=urgent&limit=1&cursor='+encodeURIComponent(first.body.nextCursor));
+    expect(second.body.items[0].id).not.toBe(first.body.items[0].id);
+    expect((await api('/tasks?priority=low&cursor='+encodeURIComponent(first.body.nextCursor))).body.error).toBe('invalid_cursor');
+    expect((await api('/tasks?priority=critical')).status).toBe(400);
+  });
+  it('keeps create retries compatible with records from before priorities existed', async () => {
+    const key=crypto.randomUUID(); const task=await api('/tasks','POST',{title:'Legacy request'},key);
+    await db.prepare("UPDATE tasks SET creation_payload=json_remove(creation_payload,'$.priority') WHERE id=?").bind(task.body.task.id).run();
+    expect((await api('/tasks','POST',{title:'Legacy request'},key)).status).toBe(200);
+    expect((await api('/tasks','POST',{title:'Legacy request',priority:'high'},key)).status).toBe(409);
+  });
+  it('blocks completion until the prerequisite is done and permits removing a dependency', async () => {
+    const parent=await add({title:'Prerequisite'}), child=await add({dependsOn:parent.id});
+    expect(child.dependencyTitle).toBe('Prerequisite'); expect(child.dependencyStatus).toBe('todo');
+    const failed=await api(`/tasks/${child.id}`,'PATCH',{version:child.version,status:'done'});
+    expect(failed.status).toBe(409); expect(failed.body.error).toBe('dependency_incomplete');
+    expect(await events(child.id)).toHaveLength(1);
+    expect((await api('/tasks','POST',{title:'Cannot finish',status:'done',dependsOn:parent.id},crypto.randomUUID())).body.error).toBe('dependency_incomplete');
+    await api(`/tasks/${parent.id}`,'PATCH',{version:parent.version,status:'done'});
+    expect((await api(`/tasks/${child.id}`)).body.task.dependencyStatus).toBe('done');
+    expect((await api(`/tasks/${child.id}`,'PATCH',{version:child.version,status:'done'})).status).toBe(200);
+    const independent=await add({dependsOn:child.id});
+    expect((await api(`/tasks/${independent.id}`,'PATCH',{version:independent.version,dependsOn:null})).body.task.dependsOn).toBeNull();
+  });
+  it('deletes and restores a completed task with its priority and completion time intact', async () => {
+    const done=await add({status:'done',priority:'urgent',notes:'Keep the details'});
+    const deleted=await api(`/tasks/${done.id}`,'DELETE',{version:done.version});
+    expect(deleted.status).toBe(200);
+    expect((await api('/tasks?status=done')).body.items).toHaveLength(0);
+    expect((await api('/tasks?view=trash&priority=urgent')).body.items[0].id).toBe(done.id);
+    const restored=await api(`/tasks/${done.id}/restore`,'POST',{version:deleted.body.task.version});
+    expect(restored.body.task).toMatchObject({status:'done',priority:'urgent',completedAt:done.completedAt,notes:'Keep the details'});
+  });
+});

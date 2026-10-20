@@ -4,6 +4,7 @@ import { SignIn, useAuth, useClerk } from '@clerk/vue';
 import { Check, LoaderCircle, Moon, Sun } from '@lucide/vue';
 import App from './App.vue';
 import { setAuthTokenProvider } from './api';
+import { deactivateDrafts } from './drafts';
 import { useTheme } from './theme';
 
 const { isLoaded, isSignedIn, userId, sessionId, getToken } = useAuth();
@@ -26,12 +27,14 @@ let loadTimer: ReturnType<typeof setTimeout> | undefined;
 
 // Register before mounting App. A user/session change invalidates any in-flight API result.
 watch([isSignedIn, userId, sessionId], () => {
+  deactivateDrafts();
   setAuthTokenProvider(async () => isSignedIn.value ? await getToken.value() : null);
 }, { immediate: true, flush: 'sync' });
 
 async function signOut() {
   if (signingOut.value) return;
   signingOut.value = true;
+  deactivateDrafts();
   signOutError.value = '';
   setAuthTokenProvider(async () => null);
   try { await clerk.value?.signOut({ redirectUrl: '/' }); }
@@ -64,7 +67,7 @@ onUnmounted(() => { clearTimeout(loadTimer); setAuthTokenProvider(async () => nu
         <button v-if="signOutError" class="secondary" @click="signingOut = false; signOut()">Try signing out again</button>
       </template>
       <SignIn v-else routing="hash" :force-redirect-url="'/'" :sign-up-force-redirect-url="'/'" :appearance="appearance" />
-      <p class="auth-note">A personal workspace, reserved for its owner.</p>
+      <p class="auth-note">Private workspaces. Access by invitation.</p>
     </section>
   </main>
 </template>

@@ -32,12 +32,12 @@ beforeAll(() => {
   });
 });
 afterAll(() => { vi.restoreAllMocks(); });
-beforeEach(async () => { await testEnv.DB.batch([testEnv.DB.prepare('DELETE FROM tasks'), testEnv.DB.prepare('DELETE FROM task_events')]); });
+beforeEach(async () => { await testEnv.DB.batch([testEnv.DB.prepare('DELETE FROM usage_sessions'), testEnv.DB.prepare('DELETE FROM invitations'), testEnv.DB.prepare('DELETE FROM workspaces'), testEnv.DB.prepare('DELETE FROM tasks'), testEnv.DB.prepare('DELETE FROM task_events')]); });
 
 describe('personal Clerk authentication', () => {
   it('returns a local session only on loopback with the local flag', async () => {
     const response = await worker.request('/api/session', {}, testEnv);
-    expect(await response.json()).toEqual({ mode: 'local', email: null, expiresAt: null });
+    expect(await response.json()).toEqual({ mode: 'local', email: null, expiresAt: null, workspaceId: 'local-preview', displayName: 'Local preview', canAdmin: false });
     expect((await worker.request(origin + '/api/session', {}, { ...env, LOCAL_DEV: 'true' })).status).toBe(401);
   });
   it('does not treat identity headers, Access tokens, cookies, query strings, or API keys as sessions', async () => {
@@ -166,5 +166,150 @@ describe('personal Clerk authentication', () => {
     expect(denied.headers.get('Access-Control-Allow-Origin')).toBeNull();
     const missingOrigin = await worker.request(`${apiOrigin}/api/tasks`, { method: 'POST', headers: { Authorization: `Bearer ${await token({ azp: pagesOrigin })}`, 'Content-Type': 'application/json' }, body: '{"title":"Not allowed"}' }, splitEnv);
     expect(missingOrigin.status).toBe(403);
+  });
+});
+
+async function invite(jwt: string) {
+  const created = await request('/admin/invitations', jwt, 'POST', { label: 'For a friend' });
+  expect(created.status).toBe(201);
+  return { ...created.data, code: new URL(created.data.link).hash.slice('#invite='.length) };
+}
+async function joinUser(adminJwt: string, userId: string, name = 'Friend') {
+  const invitation = await invite(adminJwt);
+  const jwt = await token({ sub: userId, sid: `sess_${userId.slice(5)}` });
+  const joined = await request('/invitations/accept', jwt, 'POST', { code: invitation.code, displayName: name, usageAcknowledged: true });
+  expect(joined.status).toBe(201);
+  return { jwt, invitation, session: (await request('/session', jwt)).data };
+}
+describe('invited private workspaces and administration', () => {
+  it('keeps existing personal data and reserves administration for the configured account', async () => {
+    const task = await createTask(testEnv.DB, 'personal', crypto.randomUUID(), { title: 'Existing private task' });
+    const admin = await token();
+    expect((await request('/tasks', admin)).data.items[0].id).toBe(task.task.id);
+    expect((await request('/session', admin)).data).toMatchObject({ workspaceId: 'personal', canAdmin: true });
+    const friend = await joinUser(admin, 'user_Alice');
+    expect(friend.session.canAdmin).toBe(false);
+    expect(friend.session.workspaceId).not.toBe('personal');
+    for (const [path, method, body] of [
+      ['/admin', 'GET', undefined], ['/admin/invitations', 'POST', { label: 'Forbidden' }],
+      [`/admin/invitations/${friend.invitation.invitation.id}`, 'DELETE', {}],
+      ['/admin/users/personal', 'PATCH', { status: 'banned', version: 1 }],
+    ] as const) expect((await request(path, friend.jwt, method, body)).status).toBe(403);
+    expect((await request('/admin/users/personal', admin, 'PATCH', { status: 'banned', version: 1 })).data.error).toBe('protected_admin');
+    const adminInvite = await invite(admin);
+    expect((await request('/invitations/accept', admin, 'POST', { code: adminInvite.code, displayName: 'Oops', usageAcknowledged: true })).status).toBe(409);
+    expect((await request('/session', admin)).data.workspaceId).toBe('personal');
+  });
+  it('requires admission, acknowledgment and a valid unused link; stores only its hash', async () => {
+    const admin = await token(), other = await token({ sub: 'user_Alice', sid: 'sess_Alice' });
+    expect((await request('/session', other)).data.error).toBe('invitation_required');
+    const invitation = await invite(admin);
+    const stored = await testEnv.DB.prepare('SELECT * FROM invitations WHERE id=?').bind(invitation.invitation.id).first();
+    expect(JSON.stringify(stored)).not.toContain(invitation.code);
+    expect((await request('/invitations/accept', other, 'POST', { code: invitation.code, displayName: 'Alice' })).status).toBe(400);
+    expect((await request('/invitations/accept', other, 'POST', { code: invitation.code, displayName: 'Alice', usageAcknowledged: true })).status).toBe(201);
+    const bob = await token({ sub: 'user_Bob', sid: 'sess_Bob' });
+    expect((await request('/invitations/accept', bob, 'POST', { code: invitation.code, displayName: 'Bob', usageAcknowledged: true })).data.error).toBe('invalid_invitation');
+    expect((await request('/session', bob)).status).toBe(403);
+    expect((await request('/invitations/accept', other, 'POST', { code: invitation.code, displayName: 'Alice', usageAcknowledged: true })).data.error).toBe('already_member');
+  });
+  it('revokes and expires invitations and limits unused invitations', async () => {
+    const admin = await token(), other = await token({ sub: 'user_Alice', sid: 'sess_Alice' });
+    const revoked = await invite(admin);
+    expect((await request(`/admin/invitations/${revoked.invitation.id}`, admin, 'DELETE', {})).status).toBe(200);
+    const expired = await invite(admin);
+    await testEnv.DB.prepare('UPDATE invitations SET created_at=?,expires_at=? WHERE id=?').bind(Date.now()-20000,Date.now()-10000,expired.invitation.id).run();
+    for (const code of [revoked.code, expired.code, 'a'.repeat(43)]) expect((await request('/invitations/accept', other, 'POST', { code, displayName: 'Alice', usageAcknowledged: true })).data.error).toBe('invalid_invitation');
+    for (let i = 0; i < 20; i++) await invite(admin);
+    expect((await request('/admin/invitations', admin, 'POST', { label: 'One too many' })).data.error).toBe('invitation_limit');
+  });
+  it('allows only one of two simultaneous redemptions to create a workspace', async () => {
+    const admin = await token(), invitation = await invite(admin);
+    const results = await Promise.all(['Alice','Bob'].map(async name => request('/invitations/accept', await token({ sub: `user_${name}`, sid: `sess_${name}` }), 'POST', { code: invitation.code, displayName: name, usageAcknowledged: true })));
+    expect(results.map(r => r.status).sort()).toEqual([201,400]);
+    const rows = await testEnv.DB.prepare("SELECT count(*) AS count FROM workspaces WHERE id<>'personal'").first<{count:number}>();
+    expect(rows?.count).toBe(1);
+  });
+  it('isolates tasks, history, dependencies, idempotency and pagination across members', async () => {
+    const admin = await token();
+    const alice = await joinUser(admin, 'user_Alice', 'Alice'), bob = await joinUser(admin, 'user_Bob', 'Bob');
+    const secret = await request('/tasks', alice.jwt, 'POST', { title: 'Alice secret', notes: 'Private note' });
+    await request('/tasks', alice.jwt, 'POST', { title: 'Second Alice task' });
+    const own = await request('/tasks', bob.jwt, 'POST', { title: 'Bob task' });
+    expect((await request('/tasks?q=Alice', bob.jwt)).data.items).toHaveLength(0);
+    expect((await request('/tasks?view=trash', bob.jwt)).data.items).toHaveLength(0);
+    for (const [method, suffix, body] of [
+      ['GET','',undefined], ['PATCH','',{ version:1,title:'Stolen' }], ['DELETE','',{version:1}], ['POST','/restore',{version:1}],
+    ] as const) expect((await request(`/tasks/${secret.data.task.id}${suffix}`,bob.jwt,method,body)).status).toBe(404);
+    expect((await request(`/tasks/${own.data.task.id}`,bob.jwt,'PATCH',{version:1,dependsOn:secret.data.task.id})).status).toBe(400);
+    expect((await request('/tasks', bob.jwt, 'POST', { title:'Spoof owner',ownerId:alice.session.workspaceId })).status).toBe(400);
+    const page = await request('/tasks?limit=1',alice.jwt);
+    expect(page.data.nextCursor).toBeTruthy();
+    expect((await request(`/tasks?limit=1&cursor=${encodeURIComponent(page.data.nextCursor)}`,bob.jwt)).data.error).toBe('invalid_cursor');
+    const key = crypto.randomUUID();
+    const make = (jwt:string) => worker.request(origin+'/api/tasks',{ method:'POST', headers:{Authorization:`Bearer ${jwt}`,Origin:origin,'Content-Type':'application/json','Idempotency-Key':key},body:JSON.stringify({title:'Same request key'}) },env);
+    expect((await make(alice.jwt)).status).toBe(201); expect((await make(bob.jwt)).status).toBe(201);
+    const history = await testEnv.DB.prepare('SELECT owner_id FROM task_events WHERE task_id=?').bind(secret.data.task.id).all<{owner_id:string}>();
+    expect(history.results.every(e=>e.owner_id===alice.session.workspaceId)).toBe(true);
+    const dashboard = (await request('/admin',admin)).data;
+    expect(dashboard.totals.members).toBe(3);
+    expect(dashboard.members.find((m:any)=>m.id===alice.session.workspaceId).tasks).toBe(3);
+    for (const privateValue of ['Alice secret','Private note','token_hash','redeemed_by',alice.invitation.code]) expect(JSON.stringify(dashboard)).not.toContain(privateValue);
+  });
+  it('bans the next request, prevents rejoining and restores access without removing data', async () => {
+    const admin = await token(), alice = await joinUser(admin,'user_Alice');
+    const task = await request('/tasks',alice.jwt,'POST',{title:'Keep this task'});
+    await request('/activity',alice.jwt,'POST',{active:true});
+    expect((await request(`/admin/users/${alice.session.workspaceId}`,admin,'PATCH',{status:'banned',version:1})).status).toBe(200);
+    for (const [path,method,body] of [['/session','GET',undefined],['/tasks','GET',undefined],['/activity','POST',{active:true}],['/tasks','POST',{title:'Blocked'}]] as const) expect((await request(path,alice.jwt,method,body)).data.error).toBe('account_banned');
+    const invitation = await invite(admin);
+    expect((await request('/invitations/accept',alice.jwt,'POST',{code:invitation.code,displayName:'Again',usageAcknowledged:true})).data.error).toBe('account_banned');
+    expect((await request(`/admin/users/${alice.session.workspaceId}`,admin,'PATCH',{status:'active',version:1})).status).toBe(409);
+    expect((await request(`/admin/users/${alice.session.workspaceId}`,admin,'PATCH',{status:'active',version:2})).status).toBe(200);
+    expect((await request('/tasks',alice.jwt)).data.items[0].id).toBe(task.data.task.id);
+    const usage = await testEnv.DB.prepare('SELECT active,ended_at FROM usage_sessions').first();
+    expect(usage?.active).toBe(0); expect(usage?.ended_at).not.toBeNull();
+  });
+  it('bounds active time, excludes idle and missing heartbeats, and never accepts a client duration', async () => {
+    const admin=await token(), alice=await joinUser(admin,'user_Alice');
+    const pulseToken=await token({sub:'user_Alice',sid:'sess_Alice',exp:Math.floor(Date.now()/1000)+600});
+    const reportToken=await token({exp:Math.floor(Date.now()/1000)+600});
+    let time=Date.now(); const now=vi.spyOn(Date,'now').mockImplementation(()=>time);
+    try {
+      await request('/activity',pulseToken,'POST',{active:true});
+      time+=30000; await request('/activity',pulseToken,'POST',{active:true});
+      await request('/activity',pulseToken,'POST',{active:true});
+      time+=10000; await request('/activity',pulseToken,'POST',{active:false});
+      time+=5000; await request('/activity',pulseToken,'POST',{active:true});
+      time+=46000; const fresh=pulseToken; await request('/activity',fresh,'POST',{active:true});
+      time+=40000; const newer=pulseToken; await request('/activity',newer,'POST',{active:true});
+      expect((await request('/activity',newer,'POST',{active:true,duration:99999999})).status).toBe(400);
+      const row=await testEnv.DB.prepare('SELECT active_ms FROM usage_sessions WHERE workspace_id=?').bind(alice.session.workspaceId).first<{active_ms:number}>();
+      expect(row?.active_ms).toBe(60000);
+      const report=await request('/admin',reportToken);
+      expect(report.data.members.find((m:any)=>m.id===alice.session.workspaceId)).toMatchObject({sessions:1,activeMs:60000});
+    } finally { now.mockRestore(); }
+  });
+});
+
+describe('administration pagination and transactional enrollment', () => {
+  it('paginates all members with tied timestamps and scopes search cursors', async () => {
+    const admin=await token(); await request('/session',admin);
+    await testEnv.DB.batch(Array.from({length:53},(_,index)=>testEnv.DB.prepare('INSERT INTO workspaces(id,clerk_user_id,display_name,created_at) VALUES(?,?,?,?)').bind(crypto.randomUUID(),`user_Paging${index}`,`Friend ${index}`,1)));
+    const first=await request('/admin?q=Friend',admin);
+    expect(first.data.members).toHaveLength(50); expect(first.data.nextCursor).toBeTruthy();
+    const second=await request('/admin?q=Friend&cursor='+encodeURIComponent(first.data.nextCursor),admin);
+    expect(second.data.members).toHaveLength(3); expect(second.data.nextCursor).toBeNull();
+    expect(new Set([...first.data.members,...second.data.members].map((m:any)=>m.id)).size).toBe(53);
+    expect((await request('/admin?q=Different&cursor='+encodeURIComponent(first.data.nextCursor),admin)).data.error).toBe('invalid_cursor');
+  });
+  it('does not consume an invitation if workspace creation fails', async () => {
+    const admin=await token(), invitation=await invite(admin), friend=await token({sub:'user_Failure',sid:'sess_Failure'});
+    await testEnv.DB.prepare("CREATE TRIGGER reject_workspace BEFORE INSERT ON workspaces WHEN NEW.clerk_user_id='user_Failure' BEGIN SELECT RAISE(ABORT,'simulated_workspace_failure'); END").run();
+    try { expect((await request('/invitations/accept',friend,'POST',{code:invitation.code,displayName:'Friend',usageAcknowledged:true})).status).toBe(500); }
+    finally { await testEnv.DB.prepare('DROP TRIGGER reject_workspace').run(); }
+    const row=await testEnv.DB.prepare('SELECT redeemed_at FROM invitations WHERE id=?').bind(invitation.invitation.id).first();
+    expect(row?.redeemed_at).toBeNull();
+    expect((await request('/invitations/accept',friend,'POST',{code:invitation.code,displayName:'Friend',usageAcknowledged:true})).status).toBe(201);
   });
 });

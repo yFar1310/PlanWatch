@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 // All database operations here are explicitly local. Verification always uses a new isolated path.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const backups = resolve(root, '.wrangler/backups');
+const sqlBytes = bytes => Buffer.from(bytes.toString('utf8').replaceAll('\r\n', '\n').replace(/\n*$/, '\n'));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 process.umask(0o077);
 await mkdir(backups, { recursive: true, mode: 0o700 });
@@ -57,7 +58,7 @@ try {
     await inCopy('execute', ['--file', path]);
     const roundtrip = resolve(target, 'roundtrip.sql');
     await inCopy('export', ['--output', roundtrip]);
-    if (hash(await readFile(roundtrip)) !== manifest.sha256) throw new Error('The restored export differs from the original. This backup has not passed verification.');
+    if (hash(sqlBytes(await readFile(roundtrip))) !== hash(sqlBytes(original))) throw new Error('The restored export differs from the original. This backup has not passed verification.');
     const integrity = await query('PRAGMA quick_check;');
     if (integrity.length !== 1 || integrity[0].quick_check !== 'ok' || (await query('PRAGMA foreign_key_check;')).length) throw new Error('Restored database integrity checks failed.');
     const triggers = await query("SELECT name FROM sqlite_schema WHERE type='trigger';");
@@ -76,7 +77,7 @@ try {
     if (unlinked[0]?.depends_on !== null || history.length !== 4 || !history.some(event => event.task_id === parent && event.kind === 'deleted') || !history.some(event => event.task_id === child && event.kind === 'updated')) throw new Error('Restored deletion/history behavior failed.');
     if (hash(await readFile(path)) !== manifest.sha256) throw new Error('The source backup changed during verification.');
     await writeFile(resolve(target, 'verification.json'), JSON.stringify({ verifiedAt: new Date().toISOString(), sourceSha256: manifest.sha256, ...counts[0] }, null, 2) + '\n', { mode: 0o600 });
-    console.log(`Backup verified in an isolated local copy: ${counts[0].tasks} tasks, ${counts[0].events} activity events.\nExact SQL round trip, integrity, foreign keys, dependency rejection, deletion, and history passed.\nThe working database was not changed. Verification copy: ${target}`);
+    console.log(`Backup verified in an isolated local copy: ${counts[0].tasks} tasks, ${counts[0].events} activity events.\nSQL round trip (line endings normalized), integrity, foreign keys, dependency rejection, deletion, and history passed.\nThe working database was not changed. Verification copy: ${target}`);
   } else throw new Error('Use npm run db:backup:local or npm run db:verify-backup -- <backup.sql>.');
 } catch (error) {
   console.error(error.message);

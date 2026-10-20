@@ -1,3 +1,5 @@
+export type TaskPriority = 'urgent' | 'high' | 'medium' | 'low';
+export const priorities: TaskPriority[] = ['urgent', 'high', 'medium', 'low'];
 export type TaskStatus = 'todo' | 'doing' | 'done';
 
 export interface Task {
@@ -5,6 +7,9 @@ export interface Task {
   title: string;
   notes: string | null;
   status: TaskStatus;
+  priority: TaskPriority;
+  dependencyTitle: string | null;
+  dependencyStatus: TaskStatus | null;
   estimateMinutes: number | null;
   actualMinutes: number | null;
   dependsOn: string | null;

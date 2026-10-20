@@ -40,24 +40,25 @@ Open http://127.0.0.1:5174. The dev command creates an ignored `.dev.vars` from 
 
 If that port is already in use, run `npm run dev -- --port 5175`. Use a single development server against the local database for normal use.
 
-Tasks persist under `.wrangler/state/` in this checkout; do not delete that directory to restart the app. This database is separate from v1. Use `npm run db:backup:local` for a private SQL backup, then the printed verification command to test restoration in an isolated copy. Hosted recovery still needs its own verification.
+Tasks persist under `.wrangler/state/` in this checkout; do not delete that directory to restart the app. This database is separate from v1. Use `npm run db:backup:local` for a private SQL backup, then the printed verification command to test restoration in an isolated copy. A remote backup has also been restored and checked in an isolated local copy; destructive remote rollback remains untested.
 
 ## Current prototype
 
 - Today opens by default with open work planned for today or earlier, using Europe/Paris calendar days.
-- Title-only task capture, optional planned days, Today/Tomorrow/No date shortcuts, editable notes and time estimates, explicit status/completion, and actual time spent.
-- Tasks with Open/Done/All filters and database search across titles and notes, including records beyond the loaded page.
+- Title-only task capture with Medium as the default priority, optional planned days, Today/Tomorrow/No date shortcuts, editable notes and time estimates, explicit status/completion, and actual time spent.
+- Tasks with Open/Done/All and Urgent/High/Medium/Low filters and database search across titles and notes, including records beyond the loaded page.
 - Durable Trash with search and restoration after refresh, plus undo for the last deletion. Trash is ordered by deletion time.
 - A sun/moon button switches directly between light and dark, with the choice saved on this device and applied before the first app render. The initial appearance follows the system until a choice is made.
 - Capture and task-edit drafts survive refresh in browser storage when available. Save conflicts retain drafts and offer an explicit choice to use the saved version.
 - Real D1 persistence, full activity snapshots, duplicate-create protection, and stale-edit checks.
-- Dependency validation in the API/database; the relationship editor and map come later.
+- Optional prerequisite selection at capture/edit time, dependency validation in the database, and completion blocked until the prerequisite is done. The map comes later.
 - Responsive interface with labeled controls, keyboard focus states, and reduced-motion support. Browser visual and interaction review is still pending.
 - Install manifest, home-screen icons, safe-area layouts, installation guidance, and an offline screen. Private task/session responses are never cached by the service worker.
 - Connection/session feedback, disabled saves while offline or signed out, and an explicit action for app updates.
-- Clerk sign-in, token renewal, and sign-out with backend signature verification and a pinned owner. Unconfigured hosted access stays closed.
+- Clerk sign-in with signature verification, invited private workspaces, administrator-only invitations/member statistics/bans, and drafts scoped by workspace. See [workspace admission and administration](docs/PRIVATE-WORKSPACES.md).
+- Completion requires a confirmation dialog from both the list and details editor. Completed tasks have a visible Delete action, with Trash/restore.
 
-Local API access requires both a loopback hostname and the local development flag. Hosted access requires a verified Clerk session for the configured instance, frontend origin, and owner user ID. Pages calls the separate Worker with bearer tokens and restricted CORS. The supplied Clerk development instance supports preview testing; an owned domain and production setup are still needed for release. The committed development configuration disables public access. See [phone access and hosting](docs/PHONE-ACCESS.md) for configuration, recovery, and remaining real-device checks. Goals/map, AI coaching, and scheduled reports follow [the roadmap](docs/ROADMAP.md).
+Local API access requires both a loopback hostname and the local development flag. Hosted access requires a verified Clerk session for the configured instance, frontend origin, and active workspace membership. The pinned user ID identifies the sole administrator. Pages calls the separate Worker with bearer tokens and restricted CORS. The supplied Clerk development instance supports preview testing; an owned domain and production setup are still needed for release. The committed development configuration disables public access. See [phone access and hosting](docs/PHONE-ACCESS.md) for configuration, recovery, and remaining real-device checks. Goals/map, AI coaching, and scheduled reports follow [the roadmap](docs/ROADMAP.md).
 
 ## Verify
 
@@ -65,7 +66,7 @@ Local API access requires both a loopback hostname and the local development fla
 npm run check
 ```
 
-Runs strict TypeScript checks, 45 integration tests in the Workers runtime, 12 Vue component tests, 21 API-client/service-worker/asset/deployment checks, and the production build. Tests use isolated databases and do not change the persistent development database. The PDF probe tests runtime compatibility, not a finished report template or free-tier CPU suitability. See [foundation findings](docs/FOUNDATION.md) and [daily-planning notes](docs/DAILY-PLANNING.md).
+Runs strict TypeScript checks, the Workers integration suite, Vue component tests, and API-client/service-worker/asset/deployment checks, and the production build. Tests use isolated databases and do not change the persistent development database. The PDF probe tests runtime compatibility, not a finished report template or free-tier CPU suitability. See [foundation findings](docs/FOUNDATION.md) and [daily-planning notes](docs/DAILY-PLANNING.md).
 
 Use new numbered SQL migrations for schema changes after this baseline; do not edit an already-applied migration.
 

@@ -8,7 +8,11 @@ export interface AuthBindings {
   APP_ORIGIN?: string;
   API_ORIGIN?: string;
 }
-export interface Session extends SessionInfo { ownerId: string }
+export interface Identity {
+  mode: SessionInfo['mode']; email: string | null; expiresAt: number | null;
+  userId: string | null; sessionId: string | null;
+}
+export interface Session extends SessionInfo { ownerId: string; userId: string | null; sessionId: string | null }
 export class AuthError extends Error {
   constructor(public code: string, message: string, public status: 401 | 403 | 503) { super(message); }
 }
@@ -34,10 +38,10 @@ function configuration(env: AuthBindings) {
   }
 }
 
-export async function authenticate(request: Request, env: AuthBindings): Promise<Session> {
+export async function authenticate(request: Request, env: AuthBindings): Promise<Identity> {
   const hostname = new URL(request.url).hostname;
   if (env.LOCAL_DEV === 'true' && ['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
-    return { ownerId: 'local-preview', mode: 'local', email: null, expiresAt: null };
+    return { userId: null, sessionId: null, mode: 'local', email: null, expiresAt: null };
   }
   const config = configuration(env);
   if (new URL(request.url).origin !== config.apiOrigin) throw new AuthError('invalid_origin', 'Open your private PlanWatch address to continue.', 403);
@@ -61,9 +65,7 @@ export async function authenticate(request: Request, env: AuthBindings): Promise
       || payload.act !== undefined || (payload.sts !== undefined && payload.sts !== 'active')) {
       throw new AuthError('invalid_session', 'This session could not be verified. Sign in again.', 401);
     }
-    if (payload.sub !== config.owner) throw new AuthError('not_allowed', 'This account does not have access to this workspace. Use your personal account.', 403);
-    // A stable single-person workspace; changing login providers does not change the data owner.
-    return { ownerId: 'personal', mode: 'clerk', email: null, expiresAt: payload.exp! * 1000 };
+    return { userId: payload.sub, sessionId: payload.sid, mode: 'clerk', email: null, expiresAt: payload.exp! * 1000 };
   } catch (error) {
     if (error instanceof AuthError) throw error;
     if (error instanceof errors.JOSEError && !['ERR_JWKS_TIMEOUT', 'ERR_JWKS_INVALID', 'ERR_JOSE_GENERIC'].includes(error.code)) {
