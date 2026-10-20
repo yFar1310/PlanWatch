@@ -4,7 +4,7 @@ import type { Ref } from 'vue';
 import ClerkGate from '../ClerkGate.vue';
 import Root from '../Root.vue';
 import { api } from '../api';
-import { activateDrafts, deactivateDrafts, capture } from '../drafts';
+import { activateDrafts, deactivateDrafts, capture,ideaCapture } from '../drafts';
 import { currentDay } from '../../shared/calendar';
 import { captureInvitation,clearInvitation,pendingInvitation } from '../invitations';
 
@@ -74,7 +74,7 @@ describe('Clerk sign-in and task workspace boundary', () => {
   it('loads the signed-in workspace with Clerk bearer tokens', async () => {
     signedIn(); wrapper = mount(ClerkGate); await flushPromises();
     expect(wrapper.text()).toContain('Private owner task');
-    expect(fetchMock.mock.calls.filter(([path]) => path !== '/api/activity').map(([path]) => path)).toEqual(['/api/session', expect.stringContaining('/api/tasks?')]);
+    expect(fetchMock.mock.calls.filter(([path]) => path !== '/api/activity').map(([path]) => path)).toEqual(['/api/session', expect.stringContaining('/api/tasks?'),'/api/planning/next']);
     expect(fetchMock.mock.calls.every(([, options]) => options.headers.Authorization === 'Bearer current-clerk-session')).toBe(true);
   });
   it('enables Add task after a title is entered and prevents a second submission while saving', async () => {
@@ -89,11 +89,12 @@ describe('Clerk sign-in and task workspace boundary', () => {
       return Promise.resolve(json({ items: saved ? [task] : [], nextCursor: null }));
     });
     wrapper = mount(ClerkGate); await flushPromises();
-    const add = wrapper.get<HTMLButtonElement>('button[type="submit"]');
+    await openTaskCapture();
+    const add = wrapper.get<HTMLButtonElement>('form.capture button[type="submit"]');
     expect(add.element.disabled).toBe(true);
-    await wrapper.get('[aria-label="New task title"]').setValue('Walk outside');
+    await openTaskCapture();await wrapper.get('[aria-label="New task title"]').setValue('Walk outside');
     expect(add.element.disabled).toBe(false);
-    await wrapper.get('form.capture').trigger('submit'); await flushPromises();
+    await openTaskCapture();await wrapper.get('form.capture').trigger('submit'); await flushPromises();
     expect(add.element.disabled).toBe(true);
     expect(fetchMock.mock.calls.filter(([path, options]) => path !== '/api/activity' && options.method === 'POST')).toHaveLength(1);
     finishSave(json({ task }, 201)); await flushPromises();
@@ -108,7 +109,7 @@ describe('Clerk sign-in and task workspace boundary', () => {
       : new Promise(() => {}));
     wrapper = mount(ClerkGate); await flushPromises();
     expect(wrapper.text()).toContain('Loading your tasks');
-    await wrapper.get('[aria-label="New task title"]').setValue('Capture without waiting');
+    await openTaskCapture();await wrapper.get('[aria-label="New task title"]').setValue('Capture without waiting');
     expect(wrapper.get<HTMLButtonElement>('button[type="submit"]').element.disabled).toBe(false);
   });
   it('hides private records immediately when Clerk reports sign-out', async () => {
@@ -118,13 +119,13 @@ describe('Clerk sign-in and task workspace boundary', () => {
     expect(wrapper.text()).not.toContain('Private owner task');
     expect(wrapper.find('[data-testid="clerk-signin"]').exists()).toBe(true);
     await expect(api('/tasks', 'POST', { title: 'Must not save' })).rejects.toMatchObject({ status: 401 });
-    expect(fetchMock.mock.calls.filter(([path]) => path !== '/api/activity')).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([path]) => path !== '/api/activity')).toHaveLength(3);
   });
   it('keeps drafts and hides records while an explicit sign-out is pending', async () => {
     signedIn(); auth.signOut.mockImplementation(() => new Promise(() => {}));
     wrapper = mount(ClerkGate); await flushPromises();
-    await wrapper.get('[aria-label="New task title"]').setValue('A draft to keep');
-    await wrapper.get('[aria-label="Sign out"]').trigger('click'); await flushPromises();
+    await openTaskCapture();await wrapper.get('[aria-label="New task title"]').setValue('A draft to keep');
+    await wrapper.get('[aria-label="Sign out"]').trigger('click');await button('Sign out').trigger('click'); await flushPromises();
     expect(wrapper.text()).not.toContain('Private owner task');
     expect(wrapper.text()).toContain('Signing out');
     expect(capture.value.title).toBe('');
@@ -136,14 +137,14 @@ describe('Clerk sign-in and task workspace boundary', () => {
   it('keeps content hidden when sign-out fails and offers a retry', async () => {
     signedIn(); auth.signOut.mockRejectedValue(new Error('Offline'));
     wrapper = mount(ClerkGate); await flushPromises();
-    await wrapper.get('[aria-label="Sign out"]').trigger('click'); await flushPromises();
+    await wrapper.get('[aria-label="Sign out"]').trigger('click');await button('Sign out').trigger('click'); await flushPromises();
     expect(wrapper.text()).not.toContain('Private owner task');
     expect(wrapper.text()).toContain('Sign-out could not be confirmed');
     expect(wrapper.text()).toContain('Try signing out again');
   });
   it('renews a short-lived token without removing tasks or drafts', async () => {
     signedIn(); wrapper = mount(ClerkGate); await flushPromises();
-    await wrapper.get('[aria-label="New task title"]').setValue('Keep my focus');
+    await openTaskCapture();await wrapper.get('[aria-label="New task title"]').setValue('Keep my focus');
     auth.getToken.mockResolvedValue('renewed-clerk-session');
     sessionExpires = Date.now() + 120_000;
     await vi.advanceTimersByTimeAsync(30_000); await flushPromises();
@@ -186,6 +187,7 @@ describe('Clerk sign-in and task workspace boundary', () => {
 });
 
 function button(text: string) { return wrapper!.findAll('button').find(item => item.text() === text)!; }
+async function openTaskCapture(){if(wrapper!.find('.workspace-nav [aria-current="page"]').text()==='Tasks')return;await button('Tasks').trigger('click');await vi.advanceTimersByTimeAsync(0);await flushPromises();}
 describe('invitations, administration and deliberate task actions', () => {
   it('shows enrollment without loading tasks and requires disclosure acknowledgment', async () => {
     signedIn('user_Friend');
@@ -202,7 +204,7 @@ describe('invitations, administration and deliberate task actions', () => {
     await wrapper.get('[aria-label="Display name (optional)"]').setValue('Friend'); await wrapper.get('[aria-label="Invitation link or code"]').setValue('a'.repeat(43));
     expect(button('Join PlanWatch').attributes('disabled')).toBeDefined();
     await wrapper.get('.usage-consent input').setValue(true); await wrapper.get('.enrollment-form').trigger('submit'); await flushPromises();
-    expect(wrapper.find('[aria-label="New task title"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="New idea"]').exists()).toBe(true);
     expect(wrapper.text()).not.toContain('Administration');
   });
   it('uses the captured invitation and Google name without requiring either field again',async()=>{
@@ -215,7 +217,7 @@ describe('invitations, administration and deliberate task actions', () => {
     });
     wrapper=mount(ClerkGate);await flushPromises();expect(wrapper.text()).toContain('Invitation link detected');expect(wrapper.text()).toContain('Joining as Alex Example');expect(wrapper.find('[aria-label="Invitation link or code"]').exists()).toBe(false);expect(wrapper.find('[role="alert"]').exists()).toBe(false);
     expect(wrapper.get('[aria-label="Display name (optional)"]').attributes('required')).toBeUndefined();expect(button('Join PlanWatch').attributes('disabled')).toBeDefined();
-    await wrapper.get('.usage-consent input').setValue(true);await wrapper.get('.enrollment-form').trigger('submit');await flushPromises();expect(wrapper.find('[aria-label="New task title"]').exists()).toBe(true);expect(pendingInvitation.value).toBe('');
+    await wrapper.get('.usage-consent input').setValue(true);await wrapper.get('.enrollment-form').trigger('submit');await flushPromises();expect(wrapper.find('[aria-label="New idea"]').exists()).toBe(true);expect(pendingInvitation.value).toBe('');
   });
   it('reacts to a newly opened invitation and offers recovery for a rejected link',async()=>{
     signedIn('user_Friend');auth.user.value=null;
@@ -227,7 +229,7 @@ describe('invitations, administration and deliberate task actions', () => {
   });
   it('clears private content and drafts when a heartbeat discovers a ban', async () => {
     signedIn(); wrapper=mount(ClerkGate); await flushPromises();
-    await wrapper.get('[aria-label="New task title"]').setValue('Private unsaved note');
+    await openTaskCapture();await wrapper.get('[aria-label="New task title"]').setValue('Private unsaved note');
     fetchMock.mockResolvedValue(json({error:'account_banned',message:'Access paused.'},403));
     await vi.advanceTimersByTimeAsync(30000); await flushPromises();
     expect(wrapper.text()).toContain('Access paused'); expect(wrapper.text()).not.toContain('Private owner task');
@@ -312,7 +314,7 @@ describe('capture retries across the priority migration', () => {
     signedIn(); wrapper=mount(ClerkGate); await flushPromises();
     const key=crypto.randomUUID();
     capture.value={plannedEndDate:'',startTime:'',endTime:'',title:'Unconfirmed task',plannedDate:'',priority:'medium',dependsOn:null,key,payload:JSON.stringify({title:'Unconfirmed task',plannedDate:null})};
-    await wrapper.get('form.capture').trigger('submit'); await flushPromises();
+    await openTaskCapture();await wrapper.get('form.capture').trigger('submit'); await flushPromises();
     const request=fetchMock.mock.calls.find(([path,options])=>path==='/api/tasks'&&options.method==='POST')!;
     expect(request[1].headers['Idempotency-Key']).toBe(key);
     expect(JSON.parse(request[1].body)).toMatchObject({title:'Unconfirmed task',priority:'medium',dependsOn:null});
@@ -322,7 +324,7 @@ describe('capture retries across the priority migration', () => {
 describe('desktop drawer and navigation shortcuts', () => {
   it('remembers the collapsed drawer without discarding a draft or changing the current view', async () => {
     signedIn(); wrapper=mount(ClerkGate); await flushPromises();
-    await wrapper.get('[aria-label="New task title"]').setValue('Keep this draft');
+    await openTaskCapture();await wrapper.get('[aria-label="New task title"]').setValue('Keep this draft');
     await wrapper.get('[aria-label="Close sidebar"]').trigger('click');
     expect(wrapper.get('[aria-label="Open sidebar"]').attributes('aria-expanded')).toBe('false');
     expect(localStorage.getItem('planwatch:sidebar-collapsed')).toBe('true');
@@ -331,11 +333,11 @@ describe('desktop drawer and navigation shortcuts', () => {
     expect(wrapper.get('[aria-label="Open sidebar"]').attributes('aria-expanded')).toBe('false');
     await wrapper.get('[aria-label="Open sidebar"]').trigger('click');
     expect(wrapper.get('[aria-label="Close sidebar"]').attributes('aria-expanded')).toBe('true');
-    expect(wrapper.get<HTMLInputElement>('[aria-label="New task title"]').element.value).toBe('Keep this draft');
+    await openTaskCapture();expect(wrapper.get<HTMLInputElement>('[aria-label="New task title"]').element.value).toBe('Keep this draft');
   });
   it('moves between search and capture with keyboard focus while preserving task drafts', async () => {
     signedIn(); wrapper=mount(ClerkGate,{attachTo:document.body}); await flushPromises();
-    await wrapper.get('[aria-label="New task title"]').setValue('A task to keep');
+    await openTaskCapture();await wrapper.get('[aria-label="New task title"]').setValue('A task to keep');
     document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true,cancelable:true}));
     await flushPromises();
     expect(document.activeElement).toBe(wrapper.get('.search-control input').element);
@@ -396,5 +398,41 @@ describe('planning directly from the timeline',()=>{
     expect(created).toBe(true);expect(wrapper.find('dialog').exists()).toBe(false);expect(wrapper.get('#timeline-title').text()).toBe('Timeline');
     const sent=fetchMock.mock.calls.find(([path,options])=>path==='/api/tasks'&&options.method==='POST')!;
     expect(JSON.parse(sent[1].body)).toMatchObject({title:'Focus session',plannedDate:currentDay()});
+  });
+});
+
+
+describe('idea-first daily capture',()=>{
+  it('saves an idea without hidden dates or priorities and opens a confirmation-only planner',async()=>{
+    signedIn();let saved=false;const idea={id:'idea-one',title:'Call mum',status:'todo',version:1,plannedDate:null,estimateMinutes:null,notes:null};
+    fetchMock.mockImplementation(async(path:string,options:RequestInit)=>{
+      if(path==='/api/session')return json({workspaceId:'personal',displayName:'Administrator',canAdmin:true,mode:'clerk',email:null,expiresAt:sessionExpires});
+      if(path==='/api/planning/next')return json({task:null});
+      if(path==='/api/tasks'&&options.method==='POST'){expect(JSON.parse(options.body as string)).toEqual({title:'Call mum',plannedDate:null});saved=true;return json({task:idea},201);}
+      if(path==='/api/activity')return json({recorded:true});return json({items:saved&&path.includes('view=ideas')?[idea]:[],nextCursor:null});
+    });
+    capture.value.plannedDate='2099-10-21';capture.value.priority='urgent';
+    wrapper=mount(ClerkGate);await flushPromises();expect(wrapper.find('.idea-lamp').exists()).toBe(true);expect(wrapper.find('form.capture').exists()).toBe(false);
+    await wrapper.get('[aria-label="New idea"]').setValue('Call mum');await wrapper.get('.idea-capture').trigger('submit');await flushPromises();expect(ideaCapture.value.title).toBe('');expect(wrapper.text()).toContain('Idea saved without a date');
+    await button('Ideas').trigger('click');await vi.advanceTimersByTimeAsync(0);await flushPromises();expect(fetchMock.mock.calls.some(([path])=>path.includes('view=ideas'))).toBe(true);await wrapper.get('[aria-label="Find a time for Call mum"]').trigger('click');await flushPromises();expect(wrapper.get('dialog').text()).toContain('Find a time');expect(fetchMock.mock.calls.some(([path])=>path==='/api/planning/apply')).toBe(false);
+  });
+  it('keeps an unconfirmed idea draft and reuses its key only on an explicit retry',async()=>{
+    signedIn();let attempts=0;const keys:string[]=[];
+    fetchMock.mockImplementation(async(path:string,options:RequestInit)=>{
+      if(path==='/api/session')return json({workspaceId:'personal',displayName:'Administrator',canAdmin:true,mode:'clerk',email:null,expiresAt:sessionExpires});
+      if(path==='/api/planning/next')return json({task:null});if(path==='/api/activity')return json({recorded:true});
+      if(path==='/api/tasks'&&options.method==='POST'){keys.push((options.headers as Record<string,string>)['Idempotency-Key']!);if(++attempts===1)throw new Error('Connection lost');return json({task:{id:'saved-idea',title:'A puzzle',version:1,plannedDate:null}},200);}return json({items:[],nextCursor:null});
+    });
+    wrapper=mount(ClerkGate);await flushPromises();await wrapper.get('[aria-label="New idea"]').setValue('A puzzle');await wrapper.get('.idea-capture').trigger('submit');await flushPromises();expect(ideaCapture.value.title).toBe('A puzzle');expect(attempts).toBe(1);await wrapper.get('.idea-capture').trigger('submit');await flushPromises();expect(keys[0]).toBe(keys[1]);expect(ideaCapture.value.title).toBe('');
+  });
+});
+
+
+describe('deliberate logout',()=>{
+  it('keeps the workspace and idea draft intact when sign-out is cancelled',async()=>{
+    signedIn();wrapper=mount(ClerkGate);await flushPromises();await wrapper.get('[aria-label="New idea"]').setValue('An idea to keep');
+    await wrapper.get('[aria-label="Sign out"]').trigger('click');expect(wrapper.get('dialog').text()).toContain('Sign out of PlanWatch?');expect(auth.signOut).not.toHaveBeenCalled();expect(wrapper.text()).toContain('Private owner task');
+    await button('Stay signed in').trigger('click');expect(wrapper.find('dialog').exists()).toBe(false);expect(wrapper.get<HTMLInputElement>('[aria-label="New idea"]').element.value).toBe('An idea to keep');expect(auth.signOut).not.toHaveBeenCalled();
+    await wrapper.get('[aria-label="Sign out"]').trigger('click');await wrapper.get('dialog').trigger('cancel');expect(wrapper.find('dialog').exists()).toBe(false);expect(auth.signOut).not.toHaveBeenCalled();
   });
 });

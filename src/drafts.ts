@@ -19,6 +19,8 @@ export interface TaskDraft {
 export interface CaptureDraft { plannedEndDate:string; startTime:string; endTime:string; title: string; plannedDate: string; key: string | null; payload: string | null; priority: TaskPriority; dependsOn: string | null }
 const draftKey = 'planwatch:task-drafts:v1';
 const captureKey = 'planwatch:capture:v1';
+const ideaKey = 'planwatch:idea-capture:v1';
+export const ideaCapture=ref<{title:string;key:string|null;payload:string|null}>({title:'',key:null,payload:null});
 export const storageAvailable = ref(true);
 
 function read(key: string): unknown {
@@ -45,12 +47,15 @@ export function deactivateDrafts() {
   scope = null;
   drafts.value = {};
   capture.value = emptyCapture();
+  ideaCapture.value={title:'',key:null,payload:null};
 }
 export function activateDrafts(workspaceId: string, allowLegacy = false) {
   if (scope === workspaceId) return;
   deactivateDrafts();
   const stored = read(`${draftKey}:${workspaceId}`) ?? (allowLegacy ? read(draftKey) : null);
   const saved = read(`${captureKey}:${workspaceId}`) ?? (allowLegacy ? read(captureKey) : null);
+  const idea=read(`${ideaKey}:${workspaceId}`);
+  ideaCapture.value=record(idea)&&typeof idea.title==='string'?{title:idea.title.slice(0,200),key:typeof idea.key==='string'?idea.key:null,payload:typeof idea.payload==='string'?idea.payload:null}:{title:'',key:null,payload:null};
   drafts.value = record(stored) ? Object.fromEntries(Object.entries(stored).filter((entry): entry is [string, TaskDraft] => isDraft(entry[1])).map(([id, draft]) => [id, { ...draft, priority: draft.priority ?? 'medium', dependsOn: draft.dependsOn ?? null, plannedEndDate:draft.plannedEndDate??'',startTime:draft.startTime??'',endTime:draft.endTime??'' }])) : {};
   capture.value = record(saved) && typeof saved.title === 'string' && typeof saved.plannedDate === 'string' && (!saved.plannedDate || isCalendarDay(saved.plannedDate))
     ? { plannedEndDate:typeof saved.plannedEndDate==='string'?saved.plannedEndDate:'',startTime:typeof saved.startTime==='string'?saved.startTime:'',endTime:typeof saved.endTime==='string'?saved.endTime:'',title: saved.title, plannedDate: saved.plannedDate, key: typeof saved.key === 'string' ? saved.key : null, payload: typeof saved.payload === 'string' ? saved.payload : null, priority: ['urgent','high','medium','low'].includes(String(saved.priority)) ? saved.priority as TaskPriority : 'medium', dependsOn: typeof saved.dependsOn === 'string' ? saved.dependsOn : null } : emptyCapture();
@@ -63,6 +68,7 @@ export function activateDrafts(workspaceId: string, allowLegacy = false) {
 }
 watch(drafts, () => { if (scope) write(scoped(draftKey), drafts.value); }, { deep: true, flush: 'sync' });
 watch(capture, () => { if (scope) write(scoped(captureKey), capture.value); }, { deep: true, flush: 'sync' });
+watch(ideaCapture,()=>{if(scope)write(scoped(ideaKey),ideaCapture.value);},{deep:true,flush:'sync'});
 
 export function fromTask(task: Task): TaskDraft {
   return { plannedEndDate:task.plannedEndDate??'',startTime:task.startTime??'',endTime:task.endTime??'',title: task.title, notes: task.notes ?? '', status: task.status, priority: task.priority ?? 'medium', dependsOn: task.dependsOn ?? null, plannedDate: task.plannedDate ?? '', estimate: task.estimateMinutes?.toString() ?? '', actual: task.actualMinutes?.toString() ?? '', version: task.version };

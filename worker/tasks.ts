@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Task, TaskPage, TimelinePage, TrashSummary } from '../shared/tasks';
 import { scheduleProblem, dayNumber } from '../shared/scheduling';
-import { isCalendarDay } from '../shared/calendar';
+import { isCalendarDay,currentDay,TIME_ZONE } from '../shared/calendar';
 
 export class Problem extends Error {
   constructor(public code: string, message: string, public status: 400 | 404 | 409 | 410 | 415 = 400) { super(message); }
@@ -41,10 +41,14 @@ export async function getTask(db: D1Database, owner: string, id: string, include
   if (!task) throw new Problem('not_found', 'This task is no longer available.', 404);
   return task;
 }
+export async function nextActivity(db:D1Database,owner:string){
+  const now=new Date(),day=currentDay(now),time=new Intl.DateTimeFormat('en-GB',{timeZone:TIME_ZONE,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now);
+  return {task:await db.prepare(`SELECT ${columns} FROM tasks WHERE owner_id=? AND deleted_at IS NULL AND status<>'done' AND planned_date=? AND start_time IS NOT NULL AND end_time>? ORDER BY start_time,id LIMIT 1`).bind(owner,day,time).first<Task>()};
+}
 
 export async function listTasks(db: D1Database, owner: string, query: URLSearchParams): Promise<TaskPage> {
   const limit = z.coerce.number().int().min(1).max(100).parse(query.get('limit') ?? 50);
-  const view = z.enum(['tasks', 'today', 'trash']).parse(query.get('view') ?? 'tasks');
+  const view = z.enum(['tasks', 'today', 'trash','ideas']).parse(query.get('view') ?? 'tasks');
   const status = z.enum(['open', 'done', 'all']).parse(query.get('status') ?? 'all');
   const search = z.string().trim().max(200).parse(query.get('q') ?? '');
   const day = view === 'today' ? calendarDay.parse(query.get('day')) : '';
@@ -54,6 +58,7 @@ export async function listTasks(db: D1Database, owner: string, query: URLSearchP
   const where = ['owner_id=?', view === 'trash' ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL'];
   const bindings: (string | number)[] = [owner];
   if (priority !== 'all') { where.push('priority=?'); bindings.push(priority); }
+  if (view === 'ideas') where.push('planned_date IS NULL',"status <> 'done'");
   if (view === 'today') {
     where.push("status <> 'done'", 'planned_date <= ?');
     bindings.push(day);

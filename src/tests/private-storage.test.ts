@@ -1,9 +1,14 @@
 import { beforeEach, afterEach, describe, expect, it,vi } from 'vitest';
-import { activateDrafts, deactivateDrafts, capture, drafts } from '../drafts';
+import { activateDrafts, deactivateDrafts, capture, drafts,ideaCapture } from '../drafts';
 import { captureInvitation, clearInvitation, pendingInvitation, invitationCode } from '../invitations';
 beforeEach(() => { deactivateDrafts(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null,'','/'); });
 afterEach(() => { deactivateDrafts(); clearInvitation(); });
 describe('private drafts and invitation handoff', () => {
+  it('keeps idea drafts separate from advanced capture and private across workspace changes',()=>{
+    activateDrafts('alice');ideaCapture.value={title:'Call mum',key:'save-key',payload:'pending-payload'};capture.value.title='An advanced task';
+    deactivateDrafts();expect(ideaCapture.value.title).toBe('');activateDrafts('bob');expect(ideaCapture.value.title).toBe('');ideaCapture.value.title='Bob’s idea';
+    activateDrafts('alice');expect(ideaCapture.value).toEqual({title:'Call mum',key:'save-key',payload:'pending-payload'});expect(capture.value.title).toBe('An advanced task');
+  });
   it('keeps each account’s drafts isolated through sign-out, account changes and reload', () => {
     activateDrafts('workspace-alice'); capture.value.title='Alice private draft';
     drafts.value['alice-task']={plannedEndDate:'',startTime:'',endTime:'',title:'Private edit',notes:'Secret',status:'todo',priority:'high',dependsOn:null,plannedDate:'',estimate:'',actual:'',version:1};

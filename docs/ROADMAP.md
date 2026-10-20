@@ -59,3 +59,8 @@ Remaining acceptance: actual invited Google account and phone UI flows, installa
 ## Timeline and permanent-deletion update — 20 October 2026
 
 Implemented: optional date ranges and time slots, Gantt Daily/Weekly spans with dependency connectors, a week calendar, in-view creation/editing, and permanent Trash deletion individually, by selection, or in full. Recovery/migration rehearsal and 126 automated tests passed. See [timeline and Trash](TIMELINE-AND-TRASH.md). The broader goals map, recurrence, AI and scheduled reports remain future work. Drag/drop and resizing now use DHTMLX Community and FullCalendar Standard; TanStack Table handles task sorting. See [library integration](SCHEDULING-LIBRARIES.md).
+
+
+## Product direction — ideas into realistic actions
+
+The current product specification and implementation sequence are documented in [VISION-PRODUIT.md](VISION-PRODUIT.md). The first slice adds idea capture, a private unscheduled inbox and explicitly confirmed scheduling suggestions based on rules. AI interpretation, recurring preferences, reminders and weekly advice are later slices.

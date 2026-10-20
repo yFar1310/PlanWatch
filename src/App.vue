@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { CalendarDays, CalendarRange, Check, ChevronDown, ChevronRight, CircleCheck, Download, ListTodo, LoaderCircle, LockKeyhole, LogOut, Moon, PanelLeft, Plus, RefreshCw, RotateCcw, Search, Shield, Sun, Trash2, WifiOff, X } from '@lucide/vue';
+import { CalendarDays, CalendarRange, Check, ChevronDown, ChevronRight, CircleCheck, Clock3, Download, Lightbulb, ListTodo, LoaderCircle, LockKeyhole, LogOut, Moon, PanelLeft, Plus, RefreshCw, RotateCcw, Search, Shield, Sun, Trash2, WifiOff, X } from '@lucide/vue';
 import { priorities, type TaskPriority, type Task, type TaskPage, type TrashSummary } from '../shared/tasks';
 import type { SessionInfo } from '../shared/session';
 import { currentDay, formatDay, nextDay, TIME_ZONE } from '../shared/calendar';
 import { api, ApiError } from './api';
-import { activateDrafts, deactivateDrafts, capture, clearDraft, drafts, storageAvailable, type TaskDraft } from './drafts';
+import { activateDrafts, deactivateDrafts, capture,ideaCapture,clearDraft, drafts, storageAvailable, type TaskDraft } from './drafts';
 import { useTheme } from './theme';
 import CaptureDialog from './CaptureDialog.vue';
 import TimelineView from './TimelineView.vue';
@@ -17,13 +17,14 @@ import AdminPanel from './AdminPanel.vue';
 import { pendingInvitation, invitationCode, clearInvitation } from './invitations';
 import TaskEditor from './TaskEditor.vue';
 import TaskListing from './TaskListing.vue';
+import ScheduleProposalDialog from './ScheduleProposalDialog.vue';
 import { usePwa } from './pwa';
 
 const props = defineProps<{ accountId?: string; profileName?:string }>();
 const emit = defineEmits<{ signOut: []; signIn: [] }>();
-type View = 'today' | 'tasks' | 'trash' | 'admin' | 'timeline';
+type View = 'today' | 'tasks' | 'trash' | 'admin' | 'timeline' | 'ideas';
 const view = ref<View>('today');
-const viewLabel = computed(() => ({ today: 'Today', tasks: 'All tasks', trash: 'Trash', timeline: 'Timeline', admin: 'Administration' })[view.value]);
+const viewLabel = computed(() => ({ today: 'Today', tasks: 'All tasks', trash: 'Trash', timeline: 'Timeline', admin: 'Administration',ideas:'Ideas' })[view.value]);
 const sidebarKey = 'planwatch:sidebar-collapsed';
 const sidebarCollapsed = ref(false);
 try { sidebarCollapsed.value = localStorage.getItem(sidebarKey) === 'true'; } catch { /* The drawer works without storage. */ }
@@ -35,10 +36,22 @@ const status = ref<'open' | 'done' | 'all'>('open');
 const search = ref('');
 const priorityFilter = ref<TaskPriority | 'all'>('all');
 const completion = ref<{ task: Task; draft?: TaskDraft } | null>(null);
+const logoutConfirmation=ref(false);
+function confirmSignOut(){
+  if(!logoutConfirmation.value||busy.value)return;
+  logoutConfirmation.value=false;clearPrivateView();deactivateDrafts();emit('signOut');
+}
 const tasks = ref<Task[]>([]);
 const calendarCapture = ref(false);
 const timelineTask = ref<Task|null>(null);
 const timelineRevision = ref(0);
+const planningTask=ref<Task|null>(null),lastIdea=ref<Task|null>(null),upNext=ref<Task|null>(null);
+const ideaInput=ref<HTMLInputElement|null>(null);
+function openPlanner(task:Task){
+  if(drafts.value[task.id]){error.value='Save or discard this activity’s draft in its details before finding a time.';return;}
+  error.value='';planningTask.value=task;
+}
+async function planned(task:Task){planningTask.value=null;lastIdea.value=null;notice.value=`${task.title} is planned for ${formatDay(task.plannedDate!)} · ${task.startTime}–${task.endTime}.`;try{await load();}catch(problem){showError(problem);}}
 const trashInfo = ref<TrashSummary>({count:0,cutoff:0});
 const selectedTrash = ref<Task[]>([]);
 const purgeConfirmation = ref<{items:Task[];cutoff?:number;count:number}|null>(null);
@@ -94,8 +107,8 @@ const { isDark, toggle: toggleTheme } = useTheme();
 const titleInput = ref<HTMLInputElement | null>(null);
 const searchInput = ref<HTMLInputElement | null>(null);
 const listRegion = ref<HTMLElement | null>(null);
-const heading = computed(() => view.value === 'today' ? 'A little focus for today.' : view.value === 'trash' ? 'Room to reconsider.' : 'Everything in one place.');
-const description = computed(() => view.value === 'today' ? `${formatDay(today.value)} · Today and overdue · ${TIME_ZONE}` : view.value === 'trash' ? 'Deleted tasks stay here. Restore them whenever you need.' : 'Your plans, in progress and at your own pace.');
+const heading = computed(() => view.value === 'today' ? 'Make room for what matters.' : view.value === 'trash' ? 'Room to reconsider.' : view.value==='ideas'?'An idea today. A plan when you’re ready.':'Everything in one place.');
+const description = computed(() => view.value === 'today' ? `${formatDay(today.value)} · Today and overdue · ${TIME_ZONE}` : view.value === 'trash' ? 'Deleted tasks stay here. Restore them whenever you need.' : view.value==='ideas'?'Your open activities without a date. Keep them here, refine them, or find a time.':'Your plans, in progress and at your own pace.');
 let sequence = 0;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 let clockTimer: ReturnType<typeof setInterval> | undefined;
@@ -112,9 +125,10 @@ async function load(append = false) {
   if (view.value === 'today') query.set('day', today.value);
   if (append && cursor.value) query.set('cursor', cursor.value);
   try {
-    const [page,summary] = await Promise.all([api<TaskPage>(`/tasks?${query}`),view.value==='trash'?api<TrashSummary>('/trash/summary'):Promise.resolve(null)]);
+    const [page,summary,next] = await Promise.all([api<TaskPage>(`/tasks?${query}`),view.value==='trash'?api<TrashSummary>('/trash/summary'):Promise.resolve(null),view.value==='today'?api<{task:Task|null}>('/planning/next'):Promise.resolve(null)]);
     if (request !== sequence || disposed || authState.value !== 'ready') return;
     if(summary)trashInfo.value=summary;
+    upNext.value=next?.task||null;
     if(!append)selectedTrash.value=[];
     tasks.value = append ? [...tasks.value, ...page.items.filter(task => !tasks.value.some(old => old.id === task.id))] : page.items;
     cursor.value = page.nextCursor;
@@ -123,11 +137,11 @@ async function load(append = false) {
     if (request === sequence && !disposed) throw problem;
   } finally { if (request === sequence && !disposed) loading.value = false; }
 }
-function clearPrivateView() { calendarCapture.value=false; timelineTask.value=null;purgeConfirmation.value=null;selectedTrash.value=[];trashInfo.value={count:0,cutoff:0}; completion.value = null; ++sequence; loading.value = false; tasks.value = []; cursor.value = null; editing.value = null; lastDeleted.value = null; lastSynced.value = null; }
+function clearPrivateView() { logoutConfirmation.value=false;planningTask.value=null;lastIdea.value=null;upNext.value=null;calendarCapture.value=false; timelineTask.value=null;purgeConfirmation.value=null;selectedTrash.value=[];trashInfo.value={count:0,cutoff:0}; completion.value = null; ++sequence; loading.value = false; tasks.value = []; cursor.value = null; editing.value = null; lastDeleted.value = null; lastSynced.value = null; }
 function showError(problem: unknown) {
   if (disposed) return;
   error.value = problem instanceof Error ? problem.message : 'Something went wrong. Please try again.';
-  if(problem instanceof ApiError && problem.code==='task_permanently_deleted'){capture.value.key=null;capture.value.payload=null;error.value='The earlier task was permanently deleted. Your draft is kept. Press Add task again to create a new task.';}
+  if(problem instanceof ApiError && problem.code==='task_permanently_deleted'){capture.value.key=null;capture.value.payload=null;ideaCapture.value.key=null;ideaCapture.value.payload=null;error.value='The earlier activity was permanently deleted. Your draft is kept. Submit again to create a new activity.';}
   setupRequired.value = problem instanceof ApiError && problem.code === 'setup_required';
   if (problem instanceof ApiError && [401, 403].includes(problem.status)) {
     authState.value = problem.code === 'invitation_required' ? 'invite' : problem.code === 'account_banned' ? 'banned' : 'signin';
@@ -225,9 +239,9 @@ async function run(action: () => Promise<void>, allowWhileLoading = false) {
     }
   } finally { busy.value = false; }
 }
-function chooseView(value: View) { if (!busy.value) { view.value = value; search.value = ''; } }
+function chooseView(value: View) { if (!busy.value) { if(value!==view.value)lastIdea.value=null;view.value = value; search.value = ''; } }
 async function beginTask() {
-  chooseView('today');
+  chooseView('tasks');
   await nextTick();
   titleInput.value?.focus();
 }
@@ -237,7 +251,7 @@ async function focusSearch() {
   searchInput.value?.focus();
 }
 function keyboardShortcut(event: KeyboardEvent) {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && authState.value === 'ready' && !busy.value && !completion.value && !purgeConfirmation.value && !timelineTask.value && !calendarCapture.value) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && authState.value === 'ready' && !busy.value && !completion.value && !purgeConfirmation.value && !timelineTask.value && !calendarCapture.value&&!planningTask.value&&!logoutConfirmation.value) {
     event.preventDefault(); void focusSearch();
   }
 }
@@ -270,6 +284,18 @@ async function add() {
   }, true);
   await nextTick();
   if (!error.value) titleInput.value?.focus();
+}
+async function addIdea(){
+  const title=ideaCapture.value.title.trim();if(!title)return;
+  await run(async()=>{
+    const payload=JSON.stringify({title,plannedDate:null});
+    if(ideaCapture.value.payload!==payload||!ideaCapture.value.key)ideaCapture.value={title:ideaCapture.value.title,key:crypto.randomUUID(),payload};
+    const saved=await api<{task:Task}>('/tasks','POST',{title,plannedDate:null},ideaCapture.value.key!);
+    if(disposed)return;
+    lastIdea.value=saved.task;ideaCapture.value={title:'',key:null,payload:null};notice.value='Idea saved without a date. Find it in Ideas, or give it a time when you’re ready.';
+    await load();
+  },true);
+  await nextTick();if(!error.value)ideaInput.value?.focus();
 }
 function requestToggle(task: Task) {
   if (task.status === 'done') return toggle(task);
@@ -377,6 +403,8 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <ConfirmDialog v-if="logoutConfirmation&&accountId" title="Sign out of PlanWatch?" description="Your saved activities stay in your private space. Unsaved drafts are kept on this device for your next sign-in." confirm-label="Sign out" cancel-label="Stay signed in" :busy="busy" @confirm="confirmSignOut" @cancel="logoutConfirmation=false" />
+  <ScheduleProposalDialog v-if="planningTask && authState==='ready'" :task="planningTask" :today="today" :online="online" @close="planningTask=null" @scheduled="planned" @failure="showError" />
   <CaptureDialog v-if="calendarCapture && authState === 'ready'" v-model="capture" :today="today" :busy="busy" :can-save="canWrite" :error="error" @close="calendarCapture=false" @add="add" @failure="showError" />
   <TaskDetailsDialog v-if="timelineTask && authState === 'ready'" :task="timelineTask" :busy="busy" :can-save="canWrite" :today="today" :error="error" @close="timelineTask=null" @save="save(timelineTask!,$event)" @delete="remove(timelineTask!)" @failure="showError" />
   <ConfirmDialog v-if="purgeConfirmation && authState === 'ready'" title="Delete permanently?" :description="purgeConfirmation.cutoff !== undefined ? `Delete ${purgeConfirmation.count} tasks from your entire Trash, including other pages and hidden filters? Saved history is removed too. Tasks changed after this confirmation are kept. This cannot be undone.` : `Permanently delete ${purgeConfirmation.count===1 ? '“'+purgeConfirmation.items[0]!.title+'”' : purgeConfirmation.count+' selected tasks'} and their saved history? This cannot be undone.`" :confirm-label="purgeConfirmation.cutoff !== undefined ? 'Empty Trash permanently' : 'Delete permanently'" cancel-label="Cancel" danger :busy="busy" @confirm="confirmPurge" @cancel="purgeConfirmation=null" />
@@ -391,7 +419,7 @@ onUnmounted(() => {
       </div>
       <div class="workspace-label desktop:mb-2 desktop:mt-8 desktop:px-3 desktop:tracking-widest">YOUR SPACE</div>
       <nav class="workspace-nav desktop:gap-1" aria-label="Workspace">
-        <button v-for="item in ([{ id: 'today', title: 'Today', icon: CalendarDays }, { id: 'tasks', title: 'Tasks', icon: ListTodo }, { id: 'timeline', title: 'Timeline', icon: CalendarRange }, { id: 'trash', title: 'Trash', icon: Trash2 }] as const)" :key="item.id" :class="{ active: view === item.id }" :aria-current="view === item.id ? 'page' : undefined" :disabled="busy" @click="chooseView(item.id)"><component :is="item.icon" :size="19" />{{ item.title }}</button>
+        <button v-for="item in ([{ id: 'today', title: 'Today', icon: CalendarDays }, { id: 'ideas', title: 'Ideas', icon: Lightbulb }, { id: 'tasks', title: 'Tasks', icon: ListTodo }, { id: 'timeline', title: 'Timeline', icon: CalendarRange }, { id: 'trash', title: 'Trash', icon: Trash2 }] as const)" :key="item.id" :class="{ active: view === item.id }" :aria-current="view === item.id ? 'page' : undefined" :disabled="busy" @click="chooseView(item.id)"><component :is="item.icon" :size="19" />{{ item.title }}</button>
         <button v-if="session?.canAdmin" :class="{ active: view === 'admin' }" :aria-current="view === 'admin' ? 'page' : undefined" :disabled="busy" @click="chooseView('admin')"><Shield :size="19" />Administration</button>
       </nav>
       <div class="sidebar-note desktop:hidden"><span class="small-dot"></span> One step at a time<p>A little less to remember.<br>A little more room to focus.</p></div>
@@ -411,7 +439,7 @@ onUnmounted(() => {
         <div class="topbar-actions desktop:gap-2">
           <span class="local-badge desktop:mr-3"><component v-if="!online" :is="WifiOff" :size="15" /><span v-else class="small-dot"></span>{{ !online ? 'Offline' : session?.mode === 'clerk' ? 'Private workspace' : 'On this computer' }}</span>
           <button v-if="canInstall" class="icon-button" type="button" aria-label="Install PlanWatch" title="Install PlanWatch" @click="install"><Download :size="19" /></button>
-          <button v-if="accountId" class="icon-button sign-out" type="button" :disabled="busy" aria-label="Sign out" title="Sign out" @click="clearPrivateView(); deactivateDrafts(); emit('signOut')"><LogOut :size="18" /></button>
+          <button v-if="accountId" class="icon-button sign-out" type="button" :disabled="busy" aria-label="Sign out" title="Sign out" @click="logoutConfirmation=true"><LogOut :size="18" /></button>
           <button class="theme-toggle" type="button" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme">
             <component :is="isDark ? Sun : Moon" :key="isDark ? 'sun' : 'moon'" :size="20" aria-hidden="true" />
           </button>
@@ -447,7 +475,16 @@ onUnmounted(() => {
         <div v-if="appUpdate" class="connection-banner" role="status"><span>An app update is ready. Save your changes before reloading.</span><button class="secondary" :disabled="busy" @click="applyUpdate">Reload app</button></div>
         <p v-if="registrationError" class="capture-hint">The offline screen could not be prepared. You can keep using PlanWatch online.</p>
 
-        <template v-if="view !== 'trash' && authState === 'ready'">
+        <section v-if="(view==='today'||view==='ideas')&&authState==='ready'" class="idea-home" aria-labelledby="idea-heading">
+          <div class="idea-lamp"><Lightbulb :size="30" :stroke-width="1.6" /></div>
+          <p class="eyebrow">FROM A THOUGHT TO A REAL MOMENT</p><h2 id="idea-heading">What would you like to make time for?</h2>
+          <p>A workout, a call, a little time to play. Keep the idea now; give it a place when you’re ready.</p>
+          <form class="idea-capture" @submit.prevent="addIdea"><label class="sr-only" for="idea-title">New idea</label><input id="idea-title" ref="ideaInput" v-model="ideaCapture.title" aria-label="New idea" maxlength="200" required placeholder="Call mum, go for a walk, start a puzzle…" :disabled="busy" /><button class="primary" :disabled="!canWrite||busy||!ideaCapture.title.trim()"><Plus :size="17" />Keep as idea</button></form>
+          <p class="idea-capture-help">Saved privately without a date. One idea at a time.{{ !storageAvailable?' This draft lasts only while this page stays open.':'' }}</p>
+          <div v-if="lastIdea" class="idea-saved"><div><span>READY WHEN YOU ARE</span><strong>{{ lastIdea.title }}</strong></div><button class="secondary" :disabled="busy||loading||!canWrite" @click="openPlanner(lastIdea)"><Clock3 :size="16" />Find a time</button><button v-if="view!=='ideas'" class="enrollment-other" :disabled="busy" @click="chooseView('ideas')">Open ideas</button></div>
+        </section>
+        <button v-if="view==='today'&&authState==='ready'&&upNext" class="next-activity" :disabled="busy||loading" @click="openTimelineTask(upNext)"><span class="next-icon"><Clock3 :size="20" /></span><span><small>NEXT ON YOUR SCHEDULE</small><strong>{{ upNext.title }}</strong><span>{{ upNext.startTime }}–{{ upNext.endTime }} · {{ TIME_ZONE }}</span></span><ChevronRight :size="18" /></button>
+        <template v-if="view === 'tasks' && authState === 'ready'">
           <form class="capture desktop:rounded-2xl" @submit.prevent="add">
             <div class="capture-main"><Plus :size="22" aria-hidden="true" /><input ref="titleInput" v-model="capture.title" aria-label="New task title" placeholder="What would you like to do?" maxlength="200" required aria-describedby="capture-help" :disabled="busy" /><button class="primary" :disabled="!canWrite || !capture.title.trim() || busy" type="submit"><Plus :size="17" /><span>Add task</span></button></div>
             <div class="capture-options"><label class="priority-select">Priority<select v-model="capture.priority" :disabled="busy"><option v-for="priority in priorities" :key="priority" :value="priority">{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</option></select></label><DependencyPicker v-model="capture.dependsOn" :disabled="busy || !canWrite" @failure="showError" /></div>
@@ -464,8 +501,8 @@ onUnmounted(() => {
         <label v-if="authState === 'ready'" class="priority-filter desktop:order-2 desktop:m-0 desktop:gap-2"><span class="desktop:hidden">Filter by priority</span><span class="hidden desktop:inline">Priority</span><select v-model="priorityFilter" :disabled="busy"><option value="all">All priorities</option><option v-for="priority in priorities" :key="priority" :value="priority">{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</option></select></label>
         <div class="list-toolbar desktop:contents">
           <div v-if="view === 'tasks'" class="filters desktop:order-1" aria-label="Filter tasks"><button v-for="option in (['open', 'done', 'all'] as const)" :key="option" :aria-pressed="status === option" :class="{ active: status === option }" :disabled="busy" @click="status = option">{{ option === 'open' ? 'Open' : option === 'done' ? 'Done' : 'All' }}</button></div>
-          <h2 v-else class="section-label desktop:order-1">{{ view === 'today' ? 'Your next steps' : 'Deleted tasks' }}</h2>
-          <label v-if="authState === 'ready'" class="search-control desktop:order-3 desktop:ml-auto desktop:mb-0 desktop:w-[235px]"><Search :size="16" /><span class="sr-only">Search {{ view === 'trash' ? 'Trash' : view === 'today' ? 'Today' : 'tasks' }}</span><input ref="searchInput" v-model="search" type="search" maxlength="200" :placeholder="view === 'trash' ? 'Search Trash…' : 'Search tasks…'" :disabled="busy" /><button v-if="search" type="button" class="icon-button" aria-label="Clear search" :disabled="busy" @click="search = ''"><X :size="16" /></button></label>
+          <h2 v-else class="section-label desktop:order-1">{{ view === 'today' ? 'Your next steps' : view==='ideas'?'Ideas to make room for':'Deleted tasks' }}</h2>
+          <label v-if="authState === 'ready'" class="search-control desktop:order-3 desktop:ml-auto desktop:mb-0 desktop:w-[235px]"><Search :size="16" /><span class="sr-only">Search {{ view === 'trash' ? 'Trash' : view === 'today' ? 'Today' : 'tasks' }}</span><input ref="searchInput" v-model="search" type="search" maxlength="200" :placeholder="view === 'trash' ? 'Search Trash…' : view==='ideas'?'Search ideas…':'Search tasks…'" :disabled="busy" /><button v-if="search" type="button" class="icon-button" aria-label="Clear search" :disabled="busy" @click="search = ''"><X :size="16" /></button></label>
         </div>
 
         </div>
@@ -474,7 +511,7 @@ onUnmounted(() => {
         <section ref="listRegion" class="task-list" tabindex="-1" aria-label="Tasks" :aria-busy="loading || busy">
           <div v-if="loading && !tasks.length" class="empty-state"><LoaderCircle class="spin" :size="28" /><h2>Loading your tasks…</h2></div>
           <div v-else-if="!online && !tasks.length" class="empty-state"><WifiOff :size="28" /><h2>Your workspace is waiting.</h2><p>Reconnect to load your saved tasks.</p></div>
-          <div v-else-if="!tasks.length" class="empty-state"><span class="empty-icon"><component :is="view === 'trash' ? Trash2 : CircleCheck" :size="29" /></span><h2>{{ error ? 'Your tasks could not be loaded.' : search.trim() ? 'No matching tasks.' : view === 'trash' ? 'Your Trash is empty.' : view === 'today' ? 'A little breathing room.' : status === 'done' ? 'A fresh start.' : 'A place for your next step.' }}</h2><p>{{ error ? 'Try refreshing. Your saved tasks have not been removed.' : search.trim() ? 'Try another word or clear the search.' : view === 'trash' ? 'Deleted tasks will stay here until you restore them.' : view === 'today' ? 'Nothing open is planned for today or earlier. Add something above, or look in Tasks.' : status === 'done' ? 'Completed tasks will appear here.' : 'Capture a task above when something comes to mind.' }}</p><button v-if="view === 'today' && !search && !error" class="secondary" :disabled="busy" @click="chooseView('tasks')">Browse all tasks</button></div>
+          <div v-else-if="!tasks.length" class="empty-state"><span class="empty-icon"><component :is="view === 'trash' ? Trash2 : CircleCheck" :size="29" /></span><h2>{{ error ? 'Your tasks could not be loaded.' : search.trim() ? 'No matching tasks.' : view === 'trash' ? 'Your Trash is empty.' : view === 'today' ? 'A little breathing room.' : view==='ideas'?'A place for your next idea.':status === 'done' ? 'A fresh start.' : 'A place for your next step.' }}</h2><p>{{ error ? 'Try refreshing. Your saved tasks have not been removed.' : search.trim() ? 'Try another word or clear the search.' : view === 'trash' ? 'Deleted tasks will stay here until you restore them.' : view === 'today' ? 'Nothing open is planned for today or earlier. Capture an idea above or browse your tasks.' : view==='ideas'?'Capture an idea above. Your open tasks without a date also appear here.':status === 'done' ? 'Completed tasks will appear here.' : 'Capture a task above when something comes to mind.' }}</p><button v-if="view === 'today' && !search && !error" class="secondary" :disabled="busy" @click="chooseView('tasks')">Browse all tasks</button></div>
           <TaskListing :tasks="tasks" :disabled="busy||loading" :has-more="!!cursor" v-slot="{task}">
           <article class="task" :class="{ completed: task.status === 'done', expanded: editing === task.id }">
             <div class="task-row">
@@ -486,6 +523,7 @@ onUnmounted(() => {
               </component>
               <button v-if="view === 'trash'" class="restore-button secondary" :aria-label="`Restore ${task.title}`" :disabled="!canWrite || busy || loading" @click="restore(task)"><RotateCcw :size="16" />Restore</button>
               <button v-if="view === 'trash'" class="icon-button task-delete" :aria-label="`Permanently delete ${task.title}`" :disabled="!canWrite||busy||loading" @click="requestPurge([task])"><Trash2 :size="17" /></button>
+              <button v-if="view==='ideas'" class="icon-button idea-plan" :aria-label="`Find a time for ${task.title}`" :disabled="!canWrite||busy||loading" @click="openPlanner(task)"><Clock3 :size="17" /></button>
               <button v-if="view !== 'trash'" class="icon-button task-delete" :aria-label="`Delete ${task.title}`" :disabled="!canWrite || busy || loading" @click="remove(task)"><Trash2 :size="17" /></button>
               <button v-if="view !== 'trash'" class="icon-button" :aria-label="`${editing === task.id ? 'Close details for' : 'Edit'} ${task.title}`" :aria-expanded="editing === task.id" :disabled="busy || loading" @click="editing = editing === task.id ? null : task.id"><ChevronDown :size="18" :class="{ flipped: editing === task.id }" /></button>
             </div>

@@ -2,6 +2,8 @@
 
 A fresh build of a personal task planner for everyday desktop and phone use.
 
+La direction produit et ses lots d’implémentation sont décrits dans [la vision PlanWatch — de l’idée à une action réalisable](docs/VISION-PRODUIT.md).
+
 This branch starts from a clean application tree. PlanWatch v1 is an inspiration for the product, not a codebase to extend. Its Git history is preserved.
 
 ## Repository branches

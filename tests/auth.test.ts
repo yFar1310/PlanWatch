@@ -182,6 +182,19 @@ async function joinUser(adminJwt: string, userId: string, name = 'Friend') {
   return { jwt, invitation, session: (await request('/session', jwt)).data };
 }
 describe('invited private workspaces and administration', () => {
+  it('isolates idea lists, scheduling suggestions and planning confirmations across members',async()=>{
+    const admin=await token(),friend=await joinUser(admin,'user_Planner'),privateTask=await request('/tasks',admin,'POST',{title:'Owner private idea'});
+    const idea=await request('/tasks',friend.jwt,'POST',{title:'Friend idea'});
+    const input={taskId:idea.data.task.id,version:1,day:'2099-10-21',windowStart:'18:00',windowEnd:'22:00',durationMinutes:30,bufferMinutes:15};
+    const foreignRequest={...input,taskId:privateTask.data.task.id};
+    expect((await request('/planning/suggestions',friend.jwt,'POST',foreignRequest)).status).toBe(404);
+    expect((await request('/planning/apply',friend.jwt,'POST',{...foreignRequest,snapshot:0,candidateStart:'18:00'})).status).toBe(404);
+    expect((await request('/tasks?view=ideas',friend.jwt)).data.items.map((task:any)=>task.title)).toEqual(['Friend idea']);
+    const proposal=await request('/planning/suggestions',friend.jwt,'POST',input);
+    await request('/tasks',admin,'POST',{title:'Owner busy',plannedDate:'2099-10-21',startTime:'18:00',endTime:'22:00'});
+    const saved=await request('/planning/apply',friend.jwt,'POST',{...input,snapshot:proposal.data.snapshot,candidateStart:'18:00'});expect(saved.status).toBe(200);expect(saved.data.task.startTime).toBe('18:00');
+    expect((await request('/planning/next',friend.jwt)).status).toBe(200);
+  });
   it('keeps existing personal data and reserves administration for the configured account', async () => {
     const task = await createTask(testEnv.DB, 'personal', crypto.randomUUID(), { title: 'Existing private task' });
     const admin = await token();

@@ -135,6 +135,45 @@
 .enrollment-fallback summary { padding:6px 0; cursor:pointer; color:var(--muted); font-size:12px; }
 .enrollment-fallback label { display:grid; gap:8px; margin:12px 0 0; font-size:12px; }
 .enrollment-form .enrollment-other { background:transparent; border:0; color:var(--muted); font-size:12px; text-decoration:underline; text-underline-offset:3px; min-height:40px; }
+.idea-home { display:flex; flex-direction:column; align-items:center; text-align:center; gap:12px; padding:32px 24px; margin:20px 0 24px; background:var(--surface); border:1px solid var(--border); border-radius:20px; }
+.idea-lamp { width:62px; height:62px; display:flex; align-items:center; justify-content:center; border-radius:19px; color:var(--accent); background:var(--accent-surface); margin-bottom:6px; }
+.idea-home .eyebrow { margin:0; font-size:10px; letter-spacing:1.6px; }
+.idea-home h2 { font-size:clamp(23px,3vw,30px); line-height:1.3; letter-spacing:-.6px; font-weight:550; margin:0; max-width:540px; }
+.idea-home > p:not(.eyebrow) { color:var(--muted); font-size:13px; line-height:1.7; max-width:540px; margin:0; }
+.idea-capture { display:flex; align-items:stretch; gap:8px; padding:8px; margin-top:12px; width:100%; border:1px solid var(--border); background:var(--background); border-radius:14px; }
+.idea-capture:focus-within { border-color:var(--accent); }
+.idea-capture input { flex:1; min-width:0; background:transparent; border:0; padding:10px; color:var(--text); font-size:14px; }
+.idea-capture .primary { flex-shrink:0; min-height:44px; white-space:nowrap; }
+.idea-home .idea-capture-help { font-size:11px!important; }
+.idea-saved { display:flex; align-items:center; flex-wrap:wrap; gap:12px; width:100%; padding:16px; margin-top:6px; text-align:left; border:1px solid var(--border); border-radius:12px; background:var(--hover-surface); }
+.idea-saved > div { flex:1; min-width:120px; display:grid; gap:5px; }
+.idea-saved > div > span { color:var(--muted); font-size:9px; letter-spacing:1px; }
+.idea-saved strong { font-size:13px; font-weight:550; overflow-wrap:anywhere; }
+.idea-saved .enrollment-other { border:0; background:transparent; color:var(--muted); font-size:12px; text-decoration:underline; }
+.next-activity { width:100%; display:flex; align-items:center; text-align:left; gap:14px; padding:18px; border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text); margin-bottom:20px; }
+.next-icon { width:40px; height:40px; display:flex; align-items:center; justify-content:center; flex-shrink:0; color:var(--accent); background:var(--accent-surface); border-radius:12px; }
+.next-activity > span:nth-child(2) { display:grid; min-width:0; gap:6px; flex:1; }
+.next-activity small { color:var(--muted); font-size:9px; letter-spacing:1px; }
+.next-activity strong { font-size:14px; font-weight:550; overflow-wrap:anywhere; }
+.next-activity > span > span { color:var(--muted); font-size:12px; }
+.planning-task-title { margin:0 0 10px; font-size:17px; font-weight:550; overflow-wrap:anywhere; }
+.planning-current { font-size:12px; padding:10px; border-radius:8px; background:var(--hover-surface); color:var(--muted); }
+.planning-fields { border:0; padding:0; margin:20px 0; min-width:0; }
+.planning-fields label { display:grid; gap:8px; font-size:12px; margin:0; }
+.planning-fields input,.planning-fields select { width:100%; min-height:44px; padding:10px; color:var(--text); background:var(--background); border:1px solid var(--border); border-radius:9px; }
+.planning-fields > button { margin-top:16px; min-height:44px; }
+.planning-results { border-top:1px solid var(--border); padding:16px 0; }
+.planning-method { color:var(--muted); font-size:12px; line-height:1.7; margin:0 0 12px; }
+.planning-warning { color:var(--text); padding:12px; border-radius:8px; background:var(--hover-surface); font-size:12px; line-height:1.6; }
+.planning-slots { display:grid; gap:10px; padding:0; margin:16px 0 0; border:0; min-width:0; }
+.planning-slots legend { font-size:12px; color:var(--muted); padding:0 0 10px; }
+.planning-slots label { display:flex; align-items:center; flex-wrap:nowrap; gap:12px; min-height:66px; padding:12px; margin:0; border:1px solid var(--border); border-radius:12px; cursor:pointer; }
+.planning-slots label.selected { border-color:var(--accent); background:var(--accent-surface); }
+.planning-slots input { width:18px; height:18px; min-height:18px; margin:0; padding:0; accent-color:var(--accent); flex-shrink:0; }
+.planning-slots svg { color:var(--muted); flex-shrink:0; }
+.planning-slots strong,.planning-slots small { display:block; font-size:14px; font-weight:550; }
+.planning-slots small { color:var(--muted); font-size:11px; font-weight:400; line-height:1.6; margin-top:4px; }
+@media(max-width:720px) { .idea-home { padding:24px 16px; } .idea-capture { flex-direction:column; } .idea-capture input { font-size:16px; min-height:44px; } .idea-capture .primary { width:100%; } .idea-saved { padding:12px; } .planning-fields input,.planning-fields select { font-size:16px; } .planning-fields .schedule-grid { gap:14px; } .sidebar .workspace-nav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } .sidebar .workspace-nav button:last-child { grid-column:auto!important; } }
 @media(max-width:720px) {
   .library-gantt { height:510px; } .library-calendar { padding:6px; } .library-calendar .fc { font-size:11px; }
   .listing-toolbar label { font-size:0; } .listing-toolbar select { font-size:16px; max-width:150px; }

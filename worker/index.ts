@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { ZodError, z } from 'zod';
-import { createSchema, patchSchema, versionSchema, idSchema, Problem, listTasks, getTask, createTask, updateTask, setDeleted, listTimeline } from './tasks';
+import { createSchema, patchSchema, versionSchema, idSchema, Problem, listTasks, getTask, createTask, updateTask, setDeleted, listTimeline,nextActivity } from './tasks';
 import { authenticate, AuthError, type AuthBindings, type Session, type Identity } from './auth';
+import {planningSchema,applyPlanningSchema,suggestions,applySuggestion} from './planning';
 
 import { trashSummary, purgeTasks, purgeSchema, emptyTrash, emptySchema } from './trash';
 import { resolveWorkspace, requireAdmin, acceptInvitation, acceptSchema, createInvitation, invitationSchema, revokeInvitation, deleteInvitation, setMemberStatus, memberStatusSchema, recordActivity, activitySchema, dashboard } from './workspaces';
@@ -84,6 +85,9 @@ app.get('/api/session', (c) => {
   return c.json({ mode, email, expiresAt, workspaceId, displayName, canAdmin });
 });
 app.get('/api/timeline', async c => c.json(await listTimeline(c.env.DB,c.get('session').ownerId,new URL(c.req.url).searchParams)));
+app.post('/api/planning/suggestions',async c=>c.json(await suggestions(c.env.DB,c.get('session').ownerId,await body(c,planningSchema))));
+app.get('/api/planning/next',async c=>c.json(await nextActivity(c.env.DB,c.get('session').ownerId)));
+app.post('/api/planning/apply',async c=>c.json(await applySuggestion(c.env.DB,c.get('session').ownerId,await body(c,applyPlanningSchema))));
 app.get('/api/trash/summary', async c => c.json(await trashSummary(c.env.DB,c.get('session').ownerId)));
 app.post('/api/trash/purge', async c => c.json(await purgeTasks(c.env.DB,c.get('session').ownerId,await body(c,purgeSchema))));
 app.delete('/api/trash/:id', async c => {
