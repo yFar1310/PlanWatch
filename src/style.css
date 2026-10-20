@@ -1,4 +1,4 @@
-@layer theme, base, components, utilities;
+@layer theme, base, vendor, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 /* Keep the existing mobile controls and Clerk styles; no global Preflight reset. */
 @import "./legacy.css" layer(components);

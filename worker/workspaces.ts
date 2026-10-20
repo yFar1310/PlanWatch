@@ -66,6 +66,13 @@ export async function revokeInvitation(db: D1Database, session: Session, id: str
   if (!result.meta.changes) throw new Problem('invitation_unavailable', 'That invitation is unavailable or already used.', 404);
   return { revoked: true };
 }
+export async function deleteInvitation(db: D1Database, session: Session, id: string) {
+  requireAdmin(session);
+  // Acceptance and deletion serialize in D1. Removing a used invitation never removes its workspace.
+  const result = await db.prepare('DELETE FROM invitations WHERE id=? AND created_by=?').bind(id, session.workspaceId).run();
+  if (!result.meta.changes) throw new Problem('invitation_unavailable', 'That invitation no longer exists. Refresh the list.', 404);
+  return { deleted: true };
+}
 export async function setMemberStatus(db: D1Database, session: Session, id: string, input: z.infer<typeof memberStatusSchema>) {
   requireAdmin(session);
   if (id === 'personal' || id === session.workspaceId) throw new AuthError('protected_admin', 'The administrator cannot be banned.', 403);

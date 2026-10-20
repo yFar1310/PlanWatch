@@ -25,9 +25,16 @@
   },
   "dependencies": {
     "@clerk/vue": "^2.5.12",
+    "@fullcalendar/interaction": "6.1.20",
+    "@fullcalendar/luxon3": "6.1.20",
+    "@fullcalendar/timegrid": "6.1.20",
+    "@fullcalendar/vue3": "6.1.20",
     "@lucide/vue": "latest",
+    "@tanstack/vue-table": "8.21.3",
+    "dhtmlx-gantt": "10.0.3",
     "hono": "^4.0.0",
     "jose": "^6.2.12",
+    "luxon": "3.7.2",
     "pdf-lib": "^1.17.1",
     "vue": "3.5.44",
     "zod": "^4.0.0"

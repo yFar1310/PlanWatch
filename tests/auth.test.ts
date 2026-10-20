@@ -193,6 +193,7 @@ describe('invited private workspaces and administration', () => {
     for (const [path, method, body] of [
       ['/admin', 'GET', undefined], ['/admin/invitations', 'POST', { label: 'Forbidden' }],
       [`/admin/invitations/${friend.invitation.invitation.id}`, 'DELETE', {}],
+      [`/admin/invitations/${friend.invitation.invitation.id}/delete`, 'POST', {confirmed:true}],
       ['/admin/users/personal', 'PATCH', { status: 'banned', version: 1 }],
     ] as const) expect((await request(path, friend.jwt, method, body)).status).toBe(403);
     expect((await request('/admin/users/personal', admin, 'PATCH', { status: 'banned', version: 1 })).data.error).toBe('protected_admin');
@@ -222,6 +223,23 @@ describe('invited private workspaces and administration', () => {
     for (const code of [revoked.code, expired.code, 'a'.repeat(43)]) expect((await request('/invitations/accept', other, 'POST', { code, displayName: 'Alice', usageAcknowledged: true })).data.error).toBe('invalid_invitation');
     for (let i = 0; i < 20; i++) await invite(admin);
     expect((await request('/admin/invitations', admin, 'POST', { label: 'One too many' })).data.error).toBe('invitation_limit');
+  });
+  it('deletes an invitation only after confirmation and permanently invalidates an unused link', async () => {
+    const admin=await token(), invitation=await invite(admin), other=await token({sub:'user_Alice',sid:'sess_Alice'});
+    const path=`/admin/invitations/${invitation.invitation.id}/delete`;
+    expect((await request(path,admin,'POST',{})).status).toBe(400);
+    expect((await request(path,admin,'POST',{confirmed:true})).status).toBe(200);
+    expect((await request('/admin',admin)).data.invitations).toEqual([]);
+    expect((await request('/invitations/accept',other,'POST',{code:invitation.code,displayName:'Alice',usageAcknowledged:true})).data.error).toBe('invalid_invitation');
+    expect((await request(path,admin,'POST',{confirmed:true})).status).toBe(404);
+  });
+  it('can remove a used invitation without removing the member, their tasks or their session', async () => {
+    const admin=await token(),friend=await joinUser(admin,'user_Alice');
+    const created=await request('/tasks',friend.jwt,'POST',{title:'Keep my work'});
+    expect((await request(`/admin/invitations/${friend.invitation.invitation.id}/delete`,admin,'POST',{confirmed:true})).status).toBe(200);
+    expect((await request('/session',friend.jwt)).status).toBe(200);
+    expect((await request('/tasks',friend.jwt)).data.items[0].id).toBe(created.data.task.id);
+    expect((await request('/admin',admin)).data.members).toHaveLength(2);
   });
   it('allows only one of two simultaneous redemptions to create a workspace', async () => {
     const admin = await token(), invitation = await invite(admin);

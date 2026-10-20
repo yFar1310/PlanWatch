@@ -16,7 +16,7 @@ Administration is visible only after the API returns `canAdmin=true`; API routes
 
 The code is in the URL fragment, which is not sent in HTTP requests. Before Clerk initialization, the frontend moves it to sessionStorage and clears it from the address. This allows a sign-in redirect/refresh without losing it. Redemption requires a display name and explicit acknowledgment of the usage statistics. Redemption and workspace creation run in one D1 transaction; failed creation does not consume the code. A signed-in member keeps their existing space rather than consuming another invitation.
 
-Revocation stops an unused link. A banned member cannot accept a fresh link to bypass the ban. Shared links are bearer invitations: the first eligible signed-in person to redeem one receives access. Share them only with the intended recipient.
+Revocation stops an unused link. Every invitation also has a Delete action with confirmation: it removes the invitation record and invalidates any unused link. Deleting a used invitation keeps the admitted workspace, tasks and sign-in access. Ban the member separately to remove access. The API requires administrator privileges and explicit confirmation, and scopes deletion to the creating workspace. The new-link panel clears if that invitation is revoked or deleted. A banned member cannot accept a fresh link to bypass the ban. Shared links are bearer invitations: the first eligible signed-in person to redeem one receives access. Share them only with the intended recipient.
 
 ## Monitoring and bans
 

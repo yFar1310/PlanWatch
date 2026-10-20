@@ -16,6 +16,7 @@ import DependencyPicker from './DependencyPicker.vue';
 import AdminPanel from './AdminPanel.vue';
 import { pendingInvitation, invitationCode, clearInvitation } from './invitations';
 import TaskEditor from './TaskEditor.vue';
+import TaskListing from './TaskListing.vue';
 import { usePwa } from './pwa';
 
 defineProps<{ accountId?: string }>();
@@ -468,7 +469,8 @@ onUnmounted(() => {
           <div v-if="loading && !tasks.length" class="empty-state"><LoaderCircle class="spin" :size="28" /><h2>Loading your tasks…</h2></div>
           <div v-else-if="!online && !tasks.length" class="empty-state"><WifiOff :size="28" /><h2>Your workspace is waiting.</h2><p>Reconnect to load your saved tasks.</p></div>
           <div v-else-if="!tasks.length" class="empty-state"><span class="empty-icon"><component :is="view === 'trash' ? Trash2 : CircleCheck" :size="29" /></span><h2>{{ error ? 'Your tasks could not be loaded.' : search.trim() ? 'No matching tasks.' : view === 'trash' ? 'Your Trash is empty.' : view === 'today' ? 'A little breathing room.' : status === 'done' ? 'A fresh start.' : 'A place for your next step.' }}</h2><p>{{ error ? 'Try refreshing. Your saved tasks have not been removed.' : search.trim() ? 'Try another word or clear the search.' : view === 'trash' ? 'Deleted tasks will stay here until you restore them.' : view === 'today' ? 'Nothing open is planned for today or earlier. Add something above, or look in Tasks.' : status === 'done' ? 'Completed tasks will appear here.' : 'Capture a task above when something comes to mind.' }}</p><button v-if="view === 'today' && !search && !error" class="secondary" :disabled="busy" @click="chooseView('tasks')">Browse all tasks</button></div>
-          <article v-for="task in tasks" :key="task.id" class="task" :class="{ completed: task.status === 'done', expanded: editing === task.id }">
+          <TaskListing :tasks="tasks" :disabled="busy||loading" :has-more="!!cursor" v-slot="{task}">
+          <article class="task" :class="{ completed: task.status === 'done', expanded: editing === task.id }">
             <div class="task-row">
               <label v-if="view === 'trash'" class="trash-check"><span class="sr-only">Select {{ task.title }}</span><input type="checkbox" :checked="selectedIds.has(task.id)" :disabled="busy||loading||(!selectedIds.has(task.id)&&selectedTrash.length>=100)" @change="selectTrash(task)" /></label>
               <button v-else class="checkbox" :class="{ checked: task.status === 'done' }" :aria-label="`${task.status === 'done' ? 'Reopen' : 'Complete'} ${task.title}`" :disabled="!canWrite || busy || loading || editing === task.id || !!drafts[task.id]" @click="requestToggle(task)"><Check v-if="task.status === 'done'" :size="15" /></button>
@@ -483,6 +485,7 @@ onUnmounted(() => {
             </div>
             <TaskEditor v-if="editing === task.id && view !== 'trash'" :task="task" :disabled="busy || loading" :can-save="canWrite" :today="today" @save="save(task, $event)" @failure="showError" @delete="remove(task)" @close="editing = null" />
           </article>
+          </TaskListing>
         </section>
         <div class="list-bottom"><span v-if="tasks.length">{{ tasks.length }} {{ tasks.length === 1 ? 'task' : 'tasks' }}{{ cursor ? ' loaded · more available' : '' }}</span><button v-if="cursor" class="secondary" :disabled="busy || loading" @click="run(() => load(true))">{{ loading ? 'Loading…' : 'Load more' }}</button></div>
         <footer><span class="small-dot"></span>{{ session?.mode === 'clerk' ? 'Saved privately in your workspace.' : accountId ? 'Your private workspace.' : 'Local development workspace.' }}<span v-if="lastSynced">Last refreshed {{ new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit' }).format(lastSynced) }} · {{ TIME_ZONE }}</span></footer>

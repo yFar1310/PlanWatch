@@ -4,7 +4,7 @@ import { createSchema, patchSchema, versionSchema, idSchema, Problem, listTasks,
 import { authenticate, AuthError, type AuthBindings, type Session, type Identity } from './auth';
 
 import { trashSummary, purgeTasks, purgeSchema, emptyTrash, emptySchema } from './trash';
-import { resolveWorkspace, requireAdmin, acceptInvitation, acceptSchema, createInvitation, invitationSchema, revokeInvitation, setMemberStatus, memberStatusSchema, recordActivity, activitySchema, dashboard } from './workspaces';
+import { resolveWorkspace, requireAdmin, acceptInvitation, acceptSchema, createInvitation, invitationSchema, revokeInvitation, deleteInvitation, setMemberStatus, memberStatusSchema, recordActivity, activitySchema, dashboard } from './workspaces';
 
 export interface Bindings extends AuthBindings { DB: D1Database }
 const app = new Hono<{ Bindings: Bindings; Variables: { session: Session; identity: Identity } }>();
@@ -69,6 +69,10 @@ app.use('/api/admin/*', async (c, next) => { requireAdmin(c.get('session')); awa
 app.get('/api/admin', async c => c.json(await dashboard(c.env.DB, c.get('session'), new URL(c.req.url).searchParams)));
 app.post('/api/admin/invitations', async c => c.json(await createInvitation(c.env.DB, c.get('session'), (await body(c, invitationSchema)).label, c.env.APP_ORIGIN!), 201));
 app.delete('/api/admin/invitations/:id', async c => c.json(await revokeInvitation(c.env.DB, c.get('session'), idSchema.parse(c.req.param('id')))));
+app.post('/api/admin/invitations/:id/delete', async c => {
+  await body(c, z.object({ confirmed:z.literal(true) }).strict());
+  return c.json(await deleteInvitation(c.env.DB, c.get('session'), idSchema.parse(c.req.param('id'))));
+});
 app.patch('/api/admin/users/:id', async c => c.json(await setMemberStatus(c.env.DB, c.get('session'), z.union([z.literal('personal'), idSchema]).parse(c.req.param('id')), await body(c, memberStatusSchema))));
 app.post('/api/activity', async c => c.json(await recordActivity(c.env.DB, c.get('session'), (await body(c, activitySchema)).active)));
 app.get('/api/health', async (c) => {
