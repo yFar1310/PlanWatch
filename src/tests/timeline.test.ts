@@ -61,3 +61,14 @@ describe('daily Gantt default and weekly dropdown',()=>{
     expect(wrapper.findAll('.gantt-header > span')).toHaveLength(8);expect(wrapper.get('.gantt-bar').attributes('style')).toContain('grid-column');
   });
 });
+
+describe('daily chart positioning on narrow screens',()=>{
+  it('brings the first scheduled time into view and retains the position after saving',async()=>{
+    fetchMock.mockImplementation(async()=>json({items:[task('morning',{startTime:'09:00',endTime:'10:00'})],nextCursor:null,unscheduledCount:0}));
+    wrapper=mount(TimelineView,{props:{revision:0,online:true,today:'2026-10-20'}});
+    const scroller=wrapper.get('.gantt-scroll').element as HTMLElement;
+    Object.defineProperty(scroller,'scrollWidth',{get:()=>1140});Object.defineProperty(scroller,'clientWidth',{get:()=>350});
+    await settle();expect(scroller.scrollLeft).toBe(320);
+    scroller.scrollLeft=500;await wrapper.setProps({revision:1});await settle();expect(scroller.scrollLeft).toBe(500);
+  });
+});

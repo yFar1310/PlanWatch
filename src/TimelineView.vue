@@ -11,6 +11,8 @@ const mode=ref<'gantt'|'calendar'>('gantt'),scale=ref<'day'|'week'>('day'),ancho
 const search=ref(''),priority=ref('all'),status=ref('all');
 const items=ref<Task[]>([]),cursor=ref<string|null>(null),unscheduled=ref(0),loading=ref(false),error=ref('');
 const timeScroller=ref<HTMLElement|null>(null);
+const ganttScroller=ref<HTMLElement|null>(null);
+let positionGantt=true;
 const scrollbarWidth=ref(0);
 let sequence=0,disposed=false,timer:ReturnType<typeof setTimeout>|undefined;
 const range=computed(()=>{
@@ -60,10 +62,20 @@ async function load(append=false){
     if(disposed||request!==sequence)return;
     items.value=append?[...items.value,...page.items.filter(t=>!items.value.some(old=>old.id===t.id))]:page.items;
     cursor.value=page.nextCursor;unscheduled.value=page.unscheduledCount;
+    if(!append&&daily.value&&positionGantt){
+      await nextTick();const scroller=ganttScroller.value;
+      if(scroller&&!disposed&&request===sequence){
+        const starts=items.value.filter(task=>task.startTime).map(task=>minutes(task.startTime!));
+        const first=starts.length?Math.min(...starts):9*60;
+        const track=Math.max(0,scroller.scrollWidth-180),maximum=Math.max(0,scroller.scrollWidth-scroller.clientWidth);
+        scroller.scrollLeft=Math.min(maximum,track*Math.max(0,first-60)/1440);positionGantt=false;
+      }
+    }
   }catch(problem){if(!disposed&&request===sequence){error.value=problem instanceof Error?problem.message:'Could not load the timeline.';emit('failure',problem);}}
   finally{if(!disposed&&request===sequence)loading.value=false;}
 }
 watch([()=>range.value.from,()=>range.value.to,search,priority,status,()=>props.revision,()=>props.online],(values,old)=>{
+  positionGantt=!old?.length||values.slice(0,5).some((value,index)=>value!==old[index]);
   ++sequence;clearTimeout(timer);items.value=[];cursor.value=null;loading.value=true;
   timer=setTimeout(()=>{void load();},old&&old.length>0&&values[2]!==old[2]?250:0);
 },{immediate:true});
@@ -87,7 +99,7 @@ onUnmounted(()=>{disposed=true;++sequence;clearTimeout(timer);});
     <p v-if="error" role="alert" class="error-message">{{ error }} <button :disabled="loading||!online" @click="load()">Try again</button></p>
     <p v-if="loading&&!items.length" role="status">Loading your schedule…</p>
     <p v-if="!loading&&!items.length&&!error" class="timeline-empty">Nothing planned in this period{{ search||priority!=='all'||status!=='all'?' with these filters':'' }}. Choose another period or plan a task.</p>
-    <div v-if="mode==='gantt'" class="gantt-scroll" :style="{'--gantt-days':ticks.length,'--gantt-cell-width':daily?'40px':'64px'}" tabindex="0" aria-label="Gantt chart. Scroll horizontally to explore the dates." :aria-busy="loading">
+    <div v-if="mode==='gantt'" ref="ganttScroller" class="gantt-scroll" :style="{'--gantt-days':ticks.length,'--gantt-cell-width':daily?'40px':'64px'}" tabindex="0" aria-label="Gantt chart. Scroll horizontally to explore the dates." :aria-busy="loading">
       <div class="gantt-header" :style="{gridTemplateColumns:ganttColumns}"><span class="gantt-name">Task</span><span v-for="tick in ticks" :key="tick" :class="{'is-today':!daily&&tick===today}">{{ daily?tick:dayLabel(tick) }}</span></div>
       <div class="gantt-body">
         <div v-for="task in dated" :key="task.id" class="gantt-row" :style="{gridTemplateColumns:ganttColumns}"><button class="gantt-name" :aria-label="`Edit ${task.title}`" @click="emit('edit',task)"><span class="gantt-task-title">{{ task.title }}</span><span class="gantt-task-meta"><span class="priority-badge" :data-priority="task.priority">{{ task.priority }}</span><span>{{ daily ? (task.startTime?`${task.startTime}–${task.endTime}`:'All day') : task.status==='done'?'Done':task.status==='doing'?'In progress':'To do' }}</span><Link2 v-if="task.dependsOn" :size="12" :aria-label="`Prerequisite: ${task.dependencyTitle||'unavailable'}`" /></span></button><div class="gantt-track" :style="{gridTemplateColumns:`repeat(${ticks.length},minmax(0,1fr))`}"><span v-for="(tick,index) in ticks" :key="tick" class="gantt-cell" :style="{gridColumn:index+1}" :class="{'is-today':!daily&&tick===today}"></span><button class="gantt-bar" :class="{'is-done':task.status==='done'}" :data-priority="task.priority" :style="barStyle(task)" :aria-label="`${task.title}: ${formatDay(task.plannedDate!)} to ${formatDay(task.plannedEndDate||task.plannedDate!)}${task.dependsOn?`, prerequisite ${task.dependencyTitle}`:''}`" @click="emit('edit',task)">{{ task.title }}</button></div></div>
