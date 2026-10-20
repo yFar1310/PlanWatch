@@ -39,7 +39,7 @@ beforeEach(() => {
   auth.isLoaded.value = false; auth.isSignedIn.value = false; auth.userId.value = null; auth.sessionId.value = null;
   auth.getToken.mockReset().mockResolvedValue('current-clerk-session');
   auth.signOut.mockReset().mockResolvedValue(undefined);
-  capture.value = { priority: 'medium', dependsOn: null, title: '', plannedDate: '', key: null, payload: null };
+  capture.value = { plannedEndDate:'',startTime:'',endTime:'', priority: 'medium', dependsOn: null, title: '', plannedDate: '', key: null, payload: null };
   sessionExpires = Date.now() + 60_000;
   fetchMock.mockReset().mockImplementation(async (path: string) => path === '/api/session'
     ? json({ workspaceId: 'personal', displayName: 'Administrator', canAdmin: true, mode: 'clerk', email: null, expiresAt: sessionExpires })
@@ -286,7 +286,7 @@ describe('capture retries across the priority migration', () => {
   it('preserves the request key for an unchanged legacy capture instead of creating a duplicate', async () => {
     signedIn(); wrapper=mount(ClerkGate); await flushPromises();
     const key=crypto.randomUUID();
-    capture.value={title:'Unconfirmed task',plannedDate:'',priority:'medium',dependsOn:null,key,payload:JSON.stringify({title:'Unconfirmed task',plannedDate:null})};
+    capture.value={plannedEndDate:'',startTime:'',endTime:'',title:'Unconfirmed task',plannedDate:'',priority:'medium',dependsOn:null,key,payload:JSON.stringify({title:'Unconfirmed task',plannedDate:null})};
     await wrapper.get('form.capture').trigger('submit'); await flushPromises();
     const request=fetchMock.mock.calls.find(([path,options])=>path==='/api/tasks'&&options.method==='POST')!;
     expect(request[1].headers['Idempotency-Key']).toBe(key);
@@ -318,5 +318,58 @@ describe('desktop drawer and navigation shortcuts', () => {
     await button('New task').trigger('click'); await flushPromises();
     expect(document.activeElement).toBe(wrapper.get('[aria-label="New task title"]').element);
     expect(wrapper.get<HTMLInputElement>('[aria-label="New task title"]').element.value).toBe('A task to keep');
+  });
+});
+
+describe('Trash selection and permanent deletion confirmations',()=>{
+  it('cancels without deleting and then deletes just the selected tasks',async()=>{
+    signedIn();let trash=[{id:'trash-a',title:'Deleted A',version:2},{id:'trash-b',title:'Deleted B',version:2},{id:'trash-c',title:'Deleted C',version:2}];
+    fetchMock.mockImplementation(async(path:string,options:RequestInit)=>{
+      if(path==='/api/session')return json({mode:'clerk',email:null,expiresAt:sessionExpires,workspaceId:'personal',displayName:'Administrator',canAdmin:true});
+      if(path==='/api/activity')return json({recorded:true});
+      if(path==='/api/trash/summary')return json({count:trash.length,cutoff:10});
+      if(path==='/api/trash/purge'){const input=JSON.parse(options.body as string);const ids=input.items.map((item:any)=>item.id);trash=trash.filter(task=>!ids.includes(task.id));return json({deleted:ids.length,ids});}
+      return json({items:trash.map(task=>({...task,status:'todo',priority:'medium',deletedAt:1})),nextCursor:null});
+    });
+    wrapper=mount(ClerkGate);await flushPromises();await button('Trash').trigger('click');await vi.advanceTimersByTimeAsync(0);await flushPromises();
+    const boxes=wrapper.findAll('.trash-check input');await boxes[0]!.setValue(true);await boxes[2]!.setValue(true);
+    await button('Delete selected').trigger('click');expect(wrapper.get('dialog').text()).toContain('2 selected tasks');await button('Cancel').trigger('click');
+    expect(fetchMock.mock.calls.some(([path])=>path==='/api/trash/purge')).toBe(false);
+    await button('Delete selected').trigger('click');await button('Delete permanently').trigger('click');await flushPromises();
+    const sent=fetchMock.mock.calls.find(([path])=>path==='/api/trash/purge')!;expect(JSON.parse(sent[1].body)).toEqual({items:[{id:'trash-a',version:2},{id:'trash-c',version:2}],confirmed:true});
+    expect(wrapper.text()).toContain('Deleted B');expect(wrapper.text()).not.toContain('Deleted A');expect(wrapper.text()).toContain('2 tasks permanently deleted');
+  });
+  it('uses the entire Trash count and a fresh cutoff when confirming Empty Trash',async()=>{
+    signedIn();fetchMock.mockImplementation(async(path:string)=>{
+      if(path==='/api/session')return json({mode:'clerk',email:null,expiresAt:sessionExpires,workspaceId:'personal',displayName:'Administrator',canAdmin:true});
+      if(path==='/api/activity')return json({recorded:true});if(path==='/api/trash/summary')return json({count:53,cutoff:123});
+      if(path==='/api/trash/empty')return json({deleted:53,ids:[]});return json({items:[],nextCursor:null});
+    });
+    wrapper=mount(ClerkGate);await flushPromises();await button('Trash').trigger('click');await vi.advanceTimersByTimeAsync(0);await flushPromises();
+    await button('Empty Trash (53)').trigger('click');await flushPromises();expect(wrapper.get('dialog').text()).toContain('including other pages and hidden filters');
+    expect(fetchMock.mock.calls.some(([path])=>path==='/api/trash/empty')).toBe(false);
+    await button('Empty Trash permanently').trigger('click');await flushPromises();
+    const sent=fetchMock.mock.calls.find(([path])=>path==='/api/trash/empty')!;expect(JSON.parse(sent[1].body)).toEqual({cutoff:123,confirmed:true});
+  });
+});
+
+describe('planning directly from the timeline',()=>{
+  it('creates a scheduled task in a dialog and keeps the calendar view open',async()=>{
+    signedIn();let created=false;
+    fetchMock.mockImplementation(async(path:string,options:RequestInit)=>{
+      if(path==='/api/session')return json({mode:'clerk',email:null,expiresAt:sessionExpires,workspaceId:'personal',displayName:'Administrator',canAdmin:true});
+      if(path==='/api/activity')return json({recorded:true});
+      if(path.startsWith('/api/timeline?'))return json({items:[],nextCursor:null,unscheduledCount:0});
+      if(path==='/api/tasks'&&options.method==='POST'){created=true;return json({task:{id:'planned-task'}},201);}
+      return json({items:[],nextCursor:null});
+    });
+    wrapper=mount(ClerkGate);await flushPromises();await button('Timeline').trigger('click');await vi.advanceTimersByTimeAsync(0);await flushPromises();
+    await button('Plan a task').trigger('click');await flushPromises();
+    expect(wrapper.get('dialog').text()).toContain('Plan a task');
+    await wrapper.get('dialog input[maxlength="200"]').setValue('Focus session');
+    await wrapper.get('dialog form').trigger('submit');await flushPromises();
+    expect(created).toBe(true);expect(wrapper.find('dialog').exists()).toBe(false);expect(wrapper.get('#timeline-title').text()).toBe('Timeline');
+    const sent=fetchMock.mock.calls.find(([path,options])=>path==='/api/tasks'&&options.method==='POST')!;
+    expect(JSON.parse(sent[1].body)).toMatchObject({title:'Focus session',plannedDate:currentDay()});
   });
 });

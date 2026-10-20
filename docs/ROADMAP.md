@@ -54,3 +54,8 @@ Later: full offline write synchronization, recurrence, advanced habits/calendar 
 Invited private workspaces, administrator-only invitation generation and member management, ban/reactivate, observed-session and estimated active-time counters, and account-scoped drafts are implemented. See [admission/administration](PRIVATE-WORKSPACES.md). Task priorities and filters, optional prerequisite selection, prerequisite-completion validation, deliberate completion confirmation and visible deletion of completed tasks are also implemented. The remote database export passed an isolated local restore before schema publication.
 
 Remaining acceptance: actual invited Google account and phone UI flows, installation, hosted resource measurements and remote rollback. The dependency map, goals/philosophy, AI advice and scheduled PDF/email reports remain future work; no paid feature is activated by this update.
+
+
+## Timeline and permanent-deletion update — 20 October 2026
+
+Implemented: optional date ranges and time slots, Gantt week/month spans with dependency connectors, a week calendar, in-view creation/editing, and permanent Trash deletion individually, by selection, or in full. Recovery/migration rehearsal and 124 automated tests passed. See [timeline and Trash](TIMELINE-AND-TRASH.md). The broader goals map, recurrence, drag-resize planning, AI and scheduled reports remain future work.

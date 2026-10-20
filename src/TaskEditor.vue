@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { ArrowRight, Trash2 } from '@lucide/vue';
 import { priorities, type Task } from '../shared/tasks';
+import ScheduleFields from './ScheduleFields.vue';
 import DependencyPicker from './DependencyPicker.vue';
 import { nextDay } from '../shared/calendar';
 import { clearDraft, drafts, fromTask, storageAvailable, type TaskDraft } from './drafts';
@@ -28,12 +29,7 @@ function useSaved() { draft.value = fromTask(props.task); clearDraft(props.task.
       </div>
       <label>Title<input v-model="draft.title" required maxlength="200" /></label>
       <label>Notes <span>optional</span><textarea v-model="draft.notes" maxlength="5000" rows="3" placeholder="Anything you want to remember…"></textarea></label>
-      <label>Planned day <span>optional</span><input v-model="draft.plannedDate" type="date" min="0001-01-01" max="9999-12-31" /></label>
-      <div class="date-shortcuts" aria-label="Reschedule task">
-        <button type="button" class="date-chip" @click="draft.plannedDate = today">Today</button>
-        <button type="button" class="date-chip" @click="draft.plannedDate = nextDay(today)">Tomorrow</button>
-        <button type="button" class="date-chip" @click="draft.plannedDate = ''">No date</button>
-      </div>
+      <ScheduleFields :model-value="draft" :today="today" :disabled="disabled" include-start @update:model-value="Object.assign(draft,$event)" />
       <div class="detail-grid">
         <label>Priority<select v-model="draft.priority"><option v-for="priority in priorities" :key="priority" :value="priority">{{ priority === 'medium' ? 'Medium' : priority.charAt(0).toUpperCase() + priority.slice(1) }}</option></select></label>
         <label>Status<select v-model="draft.status"><option value="todo">To do</option><option value="doing">In progress</option><option value="done">Done</option></select></label>

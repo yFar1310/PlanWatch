@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, useId } from 'vue';
-defineProps<{ title: string; description: string; busy?: boolean }>();
+defineProps<{ title: string; description: string; busy?: boolean; confirmLabel?: string; cancelLabel?: string; danger?: boolean }>();
 const emit = defineEmits<{ confirm: []; cancel: [] }>();
 const dialog = ref<HTMLDialogElement | null>(null), cancel = ref<HTMLButtonElement | null>(null);
 const id = useId();
@@ -10,6 +10,6 @@ onUnmounted(() => { if(previousFocus instanceof HTMLElement && previousFocus.isC
 </script>
 <template>
   <dialog ref="dialog" class="confirmation-dialog" :aria-labelledby="id" :aria-describedby="`${id}-description`" @cancel.prevent="!busy && emit('cancel')" @click="($event.target === dialog && !busy) && emit('cancel')">
-    <h2 :id="id">{{ title }}</h2><p :id="`${id}-description`">{{ description }}</p><div class="confirmation-actions"><button ref="cancel" class="secondary" :disabled="busy" @click="emit('cancel')">Keep working</button><button class="primary" :disabled="busy" @click="emit('confirm')">{{ busy ? 'Saving…' : 'Yes, mark as done' }}</button></div>
+    <h2 :id="id">{{ title }}</h2><p :id="`${id}-description`">{{ description }}</p><div class="confirmation-actions"><button ref="cancel" class="secondary" :disabled="busy" @click="emit('cancel')">{{ cancelLabel || 'Keep working' }}</button><button class="primary" :class="{ 'danger-confirm': danger }" :disabled="busy" @click="emit('confirm')">{{ busy ? 'Saving…' : (confirmLabel || 'Yes, mark as done') }}</button></div>
   </dialog>
 </template>

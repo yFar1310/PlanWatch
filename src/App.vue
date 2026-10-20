@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, Download, ListTodo, LoaderCircle, LockKeyhole, LogOut, Moon, PanelLeft, Plus, RefreshCw, RotateCcw, Search, Shield, Sun, Trash2, WifiOff, X } from '@lucide/vue';
-import { priorities, type TaskPriority, type Task, type TaskPage } from '../shared/tasks';
+import { CalendarDays, CalendarRange, Check, ChevronDown, ChevronRight, CircleCheck, Download, ListTodo, LoaderCircle, LockKeyhole, LogOut, Moon, PanelLeft, Plus, RefreshCw, RotateCcw, Search, Shield, Sun, Trash2, WifiOff, X } from '@lucide/vue';
+import { priorities, type TaskPriority, type Task, type TaskPage, type TrashSummary } from '../shared/tasks';
 import type { SessionInfo } from '../shared/session';
 import { currentDay, formatDay, nextDay, TIME_ZONE } from '../shared/calendar';
 import { api, ApiError } from './api';
 import { activateDrafts, deactivateDrafts, capture, clearDraft, drafts, storageAvailable, type TaskDraft } from './drafts';
 import { useTheme } from './theme';
+import CaptureDialog from './CaptureDialog.vue';
+import TimelineView from './TimelineView.vue';
+import TaskDetailsDialog from './TaskDetailsDialog.vue';
+import ScheduleFields from './ScheduleFields.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
 import DependencyPicker from './DependencyPicker.vue';
 import AdminPanel from './AdminPanel.vue';
@@ -16,9 +20,9 @@ import { usePwa } from './pwa';
 
 defineProps<{ accountId?: string }>();
 const emit = defineEmits<{ signOut: []; signIn: [] }>();
-type View = 'today' | 'tasks' | 'trash' | 'admin';
+type View = 'today' | 'tasks' | 'trash' | 'admin' | 'timeline';
 const view = ref<View>('today');
-const viewLabel = computed(() => ({ today: 'Today', tasks: 'All tasks', trash: 'Trash', admin: 'Administration' })[view.value]);
+const viewLabel = computed(() => ({ today: 'Today', tasks: 'All tasks', trash: 'Trash', timeline: 'Timeline', admin: 'Administration' })[view.value]);
 const sidebarKey = 'planwatch:sidebar-collapsed';
 const sidebarCollapsed = ref(false);
 try { sidebarCollapsed.value = localStorage.getItem(sidebarKey) === 'true'; } catch { /* The drawer works without storage. */ }
@@ -31,6 +35,38 @@ const search = ref('');
 const priorityFilter = ref<TaskPriority | 'all'>('all');
 const completion = ref<{ task: Task; draft?: TaskDraft } | null>(null);
 const tasks = ref<Task[]>([]);
+const calendarCapture = ref(false);
+const timelineTask = ref<Task|null>(null);
+const timelineRevision = ref(0);
+const trashInfo = ref<TrashSummary>({count:0,cutoff:0});
+const selectedTrash = ref<Task[]>([]);
+const purgeConfirmation = ref<{items:Task[];cutoff?:number;count:number}|null>(null);
+const selectedIds = computed(()=>new Set(selectedTrash.value.map(task=>task.id)));
+const allLoadedSelected = computed(()=>tasks.value.length>0 && tasks.value.slice(0,100).every(task=>selectedIds.value.has(task.id)));
+function selectTrash(task:Task){selectedTrash.value=selectedIds.value.has(task.id)?selectedTrash.value.filter(item=>item.id!==task.id):[...selectedTrash.value,task].slice(0,100);}
+function selectLoaded(){selectedTrash.value=allLoadedSelected.value?[]:tasks.value.slice(0,100);}
+function requestPurge(items:Task[]){purgeConfirmation.value={items:[...items],count:items.length};}
+async function requestEmptyTrash(){await run(async()=>{const summary=await api<TrashSummary>('/trash/summary');if(!summary.count){notice.value='Your Trash is already empty.';await load();return;}purgeConfirmation.value={items:[],count:summary.count,cutoff:summary.cutoff};});}
+async function confirmPurge(){
+  const pending=purgeConfirmation.value;if(!pending)return;
+  await run(async()=>{
+    const result= pending.cutoff!==undefined ? await api<{deleted:number;ids:string[]}>('/trash/empty','POST',{cutoff:pending.cutoff,confirmed:true})
+      : pending.items.length===1 ? await api<{deleted:number;ids:string[]}>(`/trash/${pending.items[0]!.id}`,'DELETE',{version:pending.items[0]!.version,confirmed:true})
+      : await api<{deleted:number;ids:string[]}>('/trash/purge','POST',{items:pending.items.map(task=>({id:task.id,version:task.version})),confirmed:true});
+    result.ids.forEach(clearDraft);
+    if(lastDeleted.value&&result.ids.includes(lastDeleted.value.id))lastDeleted.value=null;
+    selectedTrash.value=[];notice.value=`${result.deleted} ${result.deleted===1?'task':'tasks'} permanently deleted.`;
+    await load();
+  });
+  purgeConfirmation.value=null;
+}
+function openTimelineTask(task:Task){error.value='';timelineTask.value=task;}
+async function planFromTimeline(day:string,time?:string){
+  capture.value.plannedDate=day;capture.value.plannedEndDate='';capture.value.startTime=time||'';
+  const end=time?Math.min(1439,Number(time.slice(0,2))*60+Number(time.slice(3))+60):0;
+  capture.value.endTime=time?`${String(Math.floor(end/60)).padStart(2,'0')}:${String(end%60).padStart(2,'0')}`:'';
+  error.value='';calendarCapture.value=true;
+}
 const cursor = ref<string | null>(null);
 const loading = ref(true);
 const busy = ref(false);
@@ -64,6 +100,7 @@ let checkingSession = false;
 
 async function load(append = false) {
   if (disposed || authState.value !== 'ready' || view.value === 'admin') return;
+  if(view.value==='timeline'){timelineRevision.value++;loading.value=false;return;}
   const request = ++sequence;
   loading.value = true;
   if (!online.value) { loading.value = false; throw new Error('Reconnect to refresh your tasks.'); }
@@ -71,8 +108,10 @@ async function load(append = false) {
   if (view.value === 'today') query.set('day', today.value);
   if (append && cursor.value) query.set('cursor', cursor.value);
   try {
-    const page = await api<TaskPage>(`/tasks?${query}`);
+    const [page,summary] = await Promise.all([api<TaskPage>(`/tasks?${query}`),view.value==='trash'?api<TrashSummary>('/trash/summary'):Promise.resolve(null)]);
     if (request !== sequence || disposed || authState.value !== 'ready') return;
+    if(summary)trashInfo.value=summary;
+    if(!append)selectedTrash.value=[];
     tasks.value = append ? [...tasks.value, ...page.items.filter(task => !tasks.value.some(old => old.id === task.id))] : page.items;
     cursor.value = page.nextCursor;
     lastSynced.value = Date.now();
@@ -80,10 +119,11 @@ async function load(append = false) {
     if (request === sequence && !disposed) throw problem;
   } finally { if (request === sequence && !disposed) loading.value = false; }
 }
-function clearPrivateView() { completion.value = null; ++sequence; loading.value = false; tasks.value = []; cursor.value = null; editing.value = null; lastDeleted.value = null; lastSynced.value = null; }
+function clearPrivateView() { calendarCapture.value=false; timelineTask.value=null;purgeConfirmation.value=null;selectedTrash.value=[];trashInfo.value={count:0,cutoff:0}; completion.value = null; ++sequence; loading.value = false; tasks.value = []; cursor.value = null; editing.value = null; lastDeleted.value = null; lastSynced.value = null; }
 function showError(problem: unknown) {
   if (disposed) return;
   error.value = problem instanceof Error ? problem.message : 'Something went wrong. Please try again.';
+  if(problem instanceof ApiError && problem.code==='task_permanently_deleted'){capture.value.key=null;capture.value.payload=null;error.value='The earlier task was permanently deleted. Your draft is kept. Press Add task again to create a new task.';}
   setupRequired.value = problem instanceof ApiError && problem.code === 'setup_required';
   if (problem instanceof ApiError && [401, 403].includes(problem.status)) {
     authState.value = problem.code === 'invitation_required' ? 'invite' : problem.code === 'account_banned' ? 'banned' : 'signin';
@@ -153,6 +193,7 @@ async function reload() {
 }
 watch([view, status, search, today, priorityFilter], (values, old) => {
   ++sequence;
+  selectedTrash.value=[];purgeConfirmation.value=null;
   clearTimeout(reloadTimer);
   loading.value = true;
   tasks.value = [];
@@ -172,7 +213,10 @@ async function run(action: () => Promise<void>, allowWhileLoading = false) {
     showError(problem);
     if (problem instanceof ApiError && problem.status === 409) {
       // Reload the saved version, while the editor keeps its original draft/version.
-      try { await load(); } catch { /* Keep the original conflict message and draft. */ }
+      try {
+        if(timelineTask.value){const id=timelineTask.value.id;const saved=await api<{task:Task}>(`/tasks/${id}`);if(!disposed&&timelineTask.value?.id===id)timelineTask.value=saved.task;}
+        await load();
+      } catch { /* Keep the original conflict message and draft. */ }
     }
   } finally { busy.value = false; }
 }
@@ -188,7 +232,7 @@ async function focusSearch() {
   searchInput.value?.focus();
 }
 function keyboardShortcut(event: KeyboardEvent) {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && authState.value === 'ready' && !busy.value && !completion.value) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && authState.value === 'ready' && !busy.value && !completion.value && !purgeConfirmation.value && !timelineTask.value && !calendarCapture.value) {
     event.preventDefault(); void focusSearch();
   }
 }
@@ -202,18 +246,20 @@ async function add() {
   if (!title) return;
   await run(async () => {
     const plannedDate = capture.value.plannedDate || null;
-    const payload = JSON.stringify({ title, plannedDate, priority: capture.value.priority, dependsOn: capture.value.dependsOn });
+    const schedule = {plannedEndDate:capture.value.plannedEndDate||null,startTime:capture.value.startTime||null,endTime:capture.value.endTime||null};
+    const payload = JSON.stringify({ title, plannedDate, ...schedule, priority: capture.value.priority, dependsOn: capture.value.dependsOn });
     let previousPayload = capture.value.payload;
     try {
       const previous = JSON.parse(previousPayload ?? 'null');
-      if (previous && typeof previous === 'object') previousPayload = JSON.stringify({ title: previous.title, plannedDate: previous.plannedDate ?? null, priority: previous.priority ?? 'medium', dependsOn: previous.dependsOn ?? null });
+      if (previous && typeof previous === 'object') previousPayload = JSON.stringify({ title: previous.title, plannedDate: previous.plannedDate ?? null, plannedEndDate:previous.plannedEndDate??null,startTime:previous.startTime??null,endTime:previous.endTime??null, priority: previous.priority ?? 'medium', dependsOn: previous.dependsOn ?? null });
     } catch { /* An unreadable draft receives a new request key. */ }
     if (previousPayload !== payload || !capture.value.key) {
       capture.value = { ...capture.value, key: crypto.randomUUID(), payload };
     }
     capture.value.payload = payload;
-    await api<{ task: Task }>('/tasks', 'POST', { title, plannedDate, priority: capture.value.priority, dependsOn: capture.value.dependsOn }, capture.value.key!);
-    capture.value = { title: '', plannedDate: capture.value.plannedDate, key: null, payload: null, priority: 'medium', dependsOn: null };
+    await api<{ task: Task }>('/tasks', 'POST', { title, plannedDate, ...schedule, priority: capture.value.priority, dependsOn: capture.value.dependsOn }, capture.value.key!);
+    capture.value = { plannedEndDate:'',startTime:'',endTime:'',title: '', plannedDate: capture.value.plannedDate, key: null, payload: null, priority: 'medium', dependsOn: null };
+    calendarCapture.value=false;
     notice.value = plannedDate ? `Added for ${formatDay(plannedDate)}. Find all your tasks in Tasks.` : 'Added without a date. Find it in Tasks.';
     await load();
   }, true);
@@ -244,12 +290,12 @@ function save(task: Task, draft: TaskDraft, confirmed = false) {
   return run(async () => {
     await api(`/tasks/${task.id}`, 'PATCH', {
       version: draft.version, title: draft.title.trim(), notes: draft.notes.trim() || null,
-      status: draft.status, priority: draft.priority, dependsOn: draft.dependsOn, plannedDate: draft.plannedDate || null,
+      status: draft.status, priority: draft.priority, dependsOn: draft.dependsOn, plannedDate: draft.plannedDate || null, plannedEndDate:draft.plannedEndDate||null,startTime:draft.startTime||null,endTime:draft.endTime||null,
       estimateMinutes: draft.estimate === '' ? null : Number(draft.estimate),
       actualMinutes: draft.actual === '' ? null : Number(draft.actual),
     });
     clearDraft(task.id);
-    editing.value = null;
+    editing.value = null;timelineTask.value=null;
     notice.value = 'Changes saved.';
     await load();
   }).then(() => { if (!error.value) return focusList(); });
@@ -259,7 +305,7 @@ function remove(task: Task) {
     const saved = await api<{ task: Task }>(`/tasks/${task.id}`, 'DELETE', { version: task.version });
     lastDeleted.value = saved.task;
     clearDraft(task.id);
-    editing.value = null;
+    editing.value = null;timelineTask.value=null;
     notice.value = 'Moved to Trash. You can undo this or restore it from Trash later.';
     await load();
   }).then(() => { if (!error.value) return focusList(); });
@@ -326,6 +372,9 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <CaptureDialog v-if="calendarCapture && authState === 'ready'" v-model="capture" :today="today" :busy="busy" :can-save="canWrite" :error="error" @close="calendarCapture=false" @add="add" @failure="showError" />
+  <TaskDetailsDialog v-if="timelineTask && authState === 'ready'" :task="timelineTask" :busy="busy" :can-save="canWrite" :today="today" :error="error" @close="timelineTask=null" @save="save(timelineTask!,$event)" @delete="remove(timelineTask!)" @failure="showError" />
+  <ConfirmDialog v-if="purgeConfirmation && authState === 'ready'" title="Delete permanently?" :description="purgeConfirmation.cutoff !== undefined ? `Delete ${purgeConfirmation.count} tasks from your entire Trash, including other pages and hidden filters? Saved history is removed too. Tasks changed after this confirmation are kept. This cannot be undone.` : `Permanently delete ${purgeConfirmation.count===1 ? '“'+purgeConfirmation.items[0]!.title+'”' : purgeConfirmation.count+' selected tasks'} and their saved history? This cannot be undone.`" :confirm-label="purgeConfirmation.cutoff !== undefined ? 'Empty Trash permanently' : 'Delete permanently'" cancel-label="Cancel" danger :busy="busy" @confirm="confirmPurge" @cancel="purgeConfirmation=null" />
   <ConfirmDialog v-if="completion && authState === 'ready'" title="Done with this task?" :description="`Mark “${completion.task.title}” as complete? You can reopen it later.${completion.task.dependsOn && completion.task.dependencyStatus !== 'done' ? ' Its prerequisite must be completed first.' : ''}`" :busy="busy" @confirm="confirmCompletion" @cancel="completion = null" />
   <a class="skip-link" href="#workspace-content">Skip to workspace</a>
   <div class="app-shell desktop:bg-canvas">
@@ -337,7 +386,7 @@ onUnmounted(() => {
       </div>
       <div class="workspace-label desktop:mb-2 desktop:mt-8 desktop:px-3 desktop:tracking-widest">YOUR SPACE</div>
       <nav class="workspace-nav desktop:gap-1" aria-label="Workspace">
-        <button v-for="item in ([{ id: 'today', title: 'Today', icon: CalendarDays }, { id: 'tasks', title: 'Tasks', icon: ListTodo }, { id: 'trash', title: 'Trash', icon: Trash2 }] as const)" :key="item.id" :class="{ active: view === item.id }" :aria-current="view === item.id ? 'page' : undefined" :disabled="busy" @click="chooseView(item.id)"><component :is="item.icon" :size="19" />{{ item.title }}</button>
+        <button v-for="item in ([{ id: 'today', title: 'Today', icon: CalendarDays }, { id: 'tasks', title: 'Tasks', icon: ListTodo }, { id: 'timeline', title: 'Timeline', icon: CalendarRange }, { id: 'trash', title: 'Trash', icon: Trash2 }] as const)" :key="item.id" :class="{ active: view === item.id }" :aria-current="view === item.id ? 'page' : undefined" :disabled="busy" @click="chooseView(item.id)"><component :is="item.icon" :size="19" />{{ item.title }}</button>
         <button v-if="session?.canAdmin" :class="{ active: view === 'admin' }" :aria-current="view === 'admin' ? 'page' : undefined" :disabled="busy" @click="chooseView('admin')"><Shield :size="19" />Administration</button>
       </nav>
       <div class="sidebar-note desktop:hidden"><span class="small-dot"></span> One step at a time<p>A little less to remember.<br>A little more room to focus.</p></div>
@@ -377,6 +426,7 @@ onUnmounted(() => {
           <p v-if="error" class="error-message" role="alert">{{ error }}</p>
         </section>
         <AdminPanel v-else-if="view === 'admin' && session?.canAdmin && authState === 'ready'" @failure="showError" />
+        <TimelineView v-else-if="view === 'timeline' && authState === 'ready'" :revision="timelineRevision" :online="online" :today="today" @failure="showError" @edit="openTimelineTask" @plan="planFromTimeline" @browse="chooseView('tasks')" />
         <template v-else>
         <div class="heading-row">
           <div><p class="eyebrow desktop:hidden">{{ view === 'today' ? 'MAKE ROOM FOR WHAT MATTERS' : view === 'trash' ? 'NOTHING LOST IN A CLICK' : 'YOUR PLANS, YOUR PACE' }}</p><h1><span class="desktop:hidden">{{ heading }}</span><span class="hidden desktop:inline">{{ viewLabel }}</span></h1><p class="intro">{{ description }}</p></div>
@@ -395,6 +445,7 @@ onUnmounted(() => {
             <div class="capture-main"><Plus :size="22" aria-hidden="true" /><input ref="titleInput" v-model="capture.title" aria-label="New task title" placeholder="What would you like to do?" maxlength="200" required aria-describedby="capture-help" :disabled="busy" /><button class="primary" :disabled="!canWrite || !capture.title.trim() || busy" type="submit"><Plus :size="17" /><span>Add task</span></button></div>
             <div class="capture-options"><label class="priority-select">Priority<select v-model="capture.priority" :disabled="busy"><option v-for="priority in priorities" :key="priority" :value="priority">{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</option></select></label><DependencyPicker v-model="capture.dependsOn" :disabled="busy || !canWrite" @failure="showError" /></div>
             <fieldset class="capture-schedule" :disabled="busy"><label class="capture-date"><CalendarDays :size="15" /><span class="sr-only">Planned day for new task, optional</span><input v-model="capture.plannedDate" type="date" min="0001-01-01" max="9999-12-31" /></label><button class="date-chip" type="button" @click="capture.plannedDate = today">Today</button><button class="date-chip" type="button" @click="capture.plannedDate = nextDay(today)">Tomorrow</button><button class="date-chip" type="button" @click="capture.plannedDate = ''">No date</button></fieldset>
+            <details class="capture-advanced"><summary>End date &amp; time{{ capture.startTime ? ` · ${capture.startTime}–${capture.endTime}` : capture.plannedEndDate ? ` · until ${formatDay(capture.plannedEndDate)}` : '' }}</summary><ScheduleFields :model-value="capture" :today="today" :disabled="busy" @update:model-value="Object.assign(capture,$event)" /></details>
           </form>
           <p id="capture-help" class="capture-hint">Write a title, then tap Add task. Priority defaults to Medium. Dates and prerequisites are optional.{{ !storageAvailable ? ' Drafts will last only while this page stays open.' : '' }}</p>
         </template>
@@ -412,19 +463,21 @@ onUnmounted(() => {
 
         </div>
 
+        <div v-if="view === 'trash' && authState === 'ready'" class="trash-actions"><label class="trash-select-all"><input type="checkbox" :checked="allLoadedSelected" :indeterminate="selectedTrash.length>0&&!allLoadedSelected" :disabled="busy||loading||!tasks.length" @change="selectLoaded" />Select loaded tasks</label><span>{{ selectedTrash.length }} selected · up to 100</span><button class="secondary" :disabled="!canWrite||busy||loading||!selectedTrash.length" @click="requestPurge(selectedTrash)">Delete selected</button><button class="delete-button" :disabled="!canWrite||busy||loading||!trashInfo.count" @click="requestEmptyTrash">Empty Trash ({{ trashInfo.count }})</button></div>
         <section ref="listRegion" class="task-list" tabindex="-1" aria-label="Tasks" :aria-busy="loading || busy">
           <div v-if="loading && !tasks.length" class="empty-state"><LoaderCircle class="spin" :size="28" /><h2>Loading your tasks…</h2></div>
           <div v-else-if="!online && !tasks.length" class="empty-state"><WifiOff :size="28" /><h2>Your workspace is waiting.</h2><p>Reconnect to load your saved tasks.</p></div>
           <div v-else-if="!tasks.length" class="empty-state"><span class="empty-icon"><component :is="view === 'trash' ? Trash2 : CircleCheck" :size="29" /></span><h2>{{ error ? 'Your tasks could not be loaded.' : search.trim() ? 'No matching tasks.' : view === 'trash' ? 'Your Trash is empty.' : view === 'today' ? 'A little breathing room.' : status === 'done' ? 'A fresh start.' : 'A place for your next step.' }}</h2><p>{{ error ? 'Try refreshing. Your saved tasks have not been removed.' : search.trim() ? 'Try another word or clear the search.' : view === 'trash' ? 'Deleted tasks will stay here until you restore them.' : view === 'today' ? 'Nothing open is planned for today or earlier. Add something above, or look in Tasks.' : status === 'done' ? 'Completed tasks will appear here.' : 'Capture a task above when something comes to mind.' }}</p><button v-if="view === 'today' && !search && !error" class="secondary" :disabled="busy" @click="chooseView('tasks')">Browse all tasks</button></div>
           <article v-for="task in tasks" :key="task.id" class="task" :class="{ completed: task.status === 'done', expanded: editing === task.id }">
             <div class="task-row">
-              <span v-if="view === 'trash'" class="trash-marker"><Trash2 :size="18" /></span>
+              <label v-if="view === 'trash'" class="trash-check"><span class="sr-only">Select {{ task.title }}</span><input type="checkbox" :checked="selectedIds.has(task.id)" :disabled="busy||loading||(!selectedIds.has(task.id)&&selectedTrash.length>=100)" @change="selectTrash(task)" /></label>
               <button v-else class="checkbox" :class="{ checked: task.status === 'done' }" :aria-label="`${task.status === 'done' ? 'Reopen' : 'Complete'} ${task.title}`" :disabled="!canWrite || busy || loading || editing === task.id || !!drafts[task.id]" @click="requestToggle(task)"><Check v-if="task.status === 'done'" :size="15" /></button>
               <component :is="view === 'trash' ? 'div' : 'button'" class="task-title" :aria-expanded="view === 'trash' ? undefined : editing === task.id" :disabled="view === 'trash' ? undefined : busy || loading" @click="view !== 'trash' && (editing = editing === task.id ? null : task.id)">
                 <span>{{ task.title }}</span>
-                <span class="task-meta"><span class="priority-badge" :data-priority="task.priority || 'medium'">{{ task.priority || 'medium' }}</span><span v-if="task.dependsOn">{{ task.dependencyStatus === 'done' ? 'Prerequisite done' : 'Waiting for' }} · {{ task.dependencyTitle || 'prerequisite' }}</span><span v-if="task.plannedDate" :class="{ overdue: task.status !== 'done' && task.plannedDate < today }">{{ task.status !== 'done' && task.plannedDate < today ? 'Overdue · ' : '' }}{{ task.plannedDate === today ? 'Today' : task.plannedDate === nextDay(today) ? 'Tomorrow' : formatDay(task.plannedDate) }}</span><span v-else>No date</span><span v-if="task.status === 'doing'" class="doing-dot">In progress</span><span v-if="task.estimateMinutes">{{ task.estimateMinutes }} min estimated</span><span v-if="drafts[task.id]">Unsaved draft</span><span v-else-if="task.notes">Has notes</span></span>
+                <span class="task-meta"><span class="priority-badge" :data-priority="task.priority || 'medium'">{{ task.priority || 'medium' }}</span><span v-if="task.dependsOn">{{ task.dependencyStatus === 'done' ? 'Prerequisite done' : 'Waiting for' }} · {{ task.dependencyTitle || 'prerequisite' }}</span><span v-if="task.plannedDate" :class="{ overdue: task.status !== 'done' && task.plannedDate < today }">{{ task.status !== 'done' && task.plannedDate < today ? 'Overdue · ' : '' }}{{ task.plannedDate === today ? 'Today' : task.plannedDate === nextDay(today) ? 'Tomorrow' : formatDay(task.plannedDate) }}</span><span v-else>No date</span><span v-if="task.plannedEndDate && task.plannedEndDate !== task.plannedDate">until {{ formatDay(task.plannedEndDate) }}</span><span v-if="task.startTime">{{ task.startTime }}–{{ task.endTime }}</span><span v-if="task.status === 'doing'" class="doing-dot">In progress</span><span v-if="task.estimateMinutes">{{ task.estimateMinutes }} min estimated</span><span v-if="drafts[task.id]">Unsaved draft</span><span v-else-if="task.notes">Has notes</span></span>
               </component>
               <button v-if="view === 'trash'" class="restore-button secondary" :aria-label="`Restore ${task.title}`" :disabled="!canWrite || busy || loading" @click="restore(task)"><RotateCcw :size="16" />Restore</button>
+              <button v-if="view === 'trash'" class="icon-button task-delete" :aria-label="`Permanently delete ${task.title}`" :disabled="!canWrite||busy||loading" @click="requestPurge([task])"><Trash2 :size="17" /></button>
               <button v-if="view !== 'trash'" class="icon-button task-delete" :aria-label="`Delete ${task.title}`" :disabled="!canWrite || busy || loading" @click="remove(task)"><Trash2 :size="17" /></button>
               <button v-if="view !== 'trash'" class="icon-button" :aria-label="`${editing === task.id ? 'Close details for' : 'Edit'} ${task.title}`" :aria-expanded="editing === task.id" :disabled="busy || loading" @click="editing = editing === task.id ? null : task.id"><ChevronDown :size="18" :class="{ flipped: editing === task.id }" /></button>
             </div>

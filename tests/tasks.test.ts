@@ -25,7 +25,7 @@ async function events(id: string) {
 }
 
 beforeEach(async () => {
-  await db.batch([db.prepare('DELETE FROM tasks'), db.prepare('DELETE FROM task_events')]);
+  await db.batch([db.prepare('DELETE FROM tasks'), db.prepare('DELETE FROM task_events'), db.prepare('DELETE FROM purged_tasks')]);
 });
 
 describe('task foundation in the real Workers runtime', () => {
@@ -380,5 +380,98 @@ describe('priorities and prerequisite completion', () => {
     expect((await api('/tasks?view=trash&priority=urgent')).body.items[0].id).toBe(done.id);
     const restored=await api(`/tasks/${done.id}/restore`,'POST',{version:deleted.body.task.version});
     expect(restored.body.task).toMatchObject({status:'done',priority:'urgent',completedAt:done.completedAt,notes:'Keep the details'});
+  });
+});
+
+describe('permanent Trash deletion', () => {
+  async function trash(input:Record<string,unknown>={}){const task=await add(input);return(await api(`/tasks/${task.id}`,'DELETE',{version:task.version})).body.task;}
+  it('requires confirmation and refuses live or stale tasks', async () => {
+    const live=await add(),deleted=await trash();
+    expect((await api(`/trash/${deleted.id}`,'DELETE',{version:deleted.version})).status).toBe(400);
+    expect((await api(`/trash/${live.id}`,'DELETE',{version:live.version,confirmed:true})).status).toBe(409);
+    expect((await api(`/trash/${deleted.id}`,'DELETE',{version:deleted.version-1,confirmed:true})).status).toBe(409);
+    expect((await api('/trash/summary')).body.count).toBe(1);
+  });
+  it('erases one task and its content history and prevents replay from recreating it', async () => {
+    const key=crypto.randomUUID();const created=await api('/tasks','POST',{title:'Erase this content',notes:'Private history'},key);
+    const deleted=(await api(`/tasks/${created.body.task.id}`,'DELETE',{version:1})).body.task;
+    const result=await api(`/trash/${deleted.id}`,'DELETE',{version:deleted.version,confirmed:true});
+    expect(result.body).toEqual({deleted:1,ids:[deleted.id]});expect(await events(deleted.id)).toHaveLength(0);
+    expect((await api(`/tasks/${deleted.id}/restore`,'POST',{version:deleted.version})).status).toBe(404);
+    const tombstone=await db.prepare('SELECT * FROM purged_tasks WHERE task_id=?').bind(deleted.id).first();
+    expect(tombstone).toMatchObject({owner_id:'local-preview',creation_key:key});
+    expect(JSON.stringify(tombstone)).not.toContain('Erase this content');expect(JSON.stringify(tombstone)).not.toContain('Private history');
+    expect((await api('/tasks','POST',{title:'Erase this content',notes:'Private history'},key)).status).toBe(410);
+    expect((await api('/tasks?view=trash')).body.items).toHaveLength(0);
+    expect((await api('/tasks','POST',{title:'Erase this content',notes:'Private history'},crypto.randomUUID())).status).toBe(201);
+  });
+  it('deletes only the chosen tasks atomically and keeps the others', async () => {
+    const a=await trash(),b=await trash(),c=await trash();
+    const result=await api('/trash/purge','POST',{items:[a,b].map(t=>({id:t.id,version:t.version})),confirmed:true});
+    expect(result.body.deleted).toBe(2);expect((await api('/tasks?view=trash')).body.items.map((t:any)=>t.id)).toEqual([c.id]);
+    expect(await events(a.id)).toHaveLength(0);expect(await events(b.id)).toHaveLength(0);expect(await events(c.id)).toHaveLength(2);
+    expect((await api('/trash/purge','POST',{items:[{id:c.id,version:c.version},{id:c.id,version:c.version}],confirmed:true})).status).toBe(400);
+  });
+  it('does not delete any selected task when one was restored elsewhere', async () => {
+    const a=await trash(),b=await trash();await api(`/tasks/${b.id}/restore`,'POST',{version:b.version});
+    const result=await api('/trash/purge','POST',{items:[a,b].map(t=>({id:t.id,version:t.version})),confirmed:true});
+    expect(result.status).toBe(409);expect((await api('/tasks?view=trash')).body.items.map((t:any)=>t.id)).toEqual([a.id]);
+    expect((await api(`/tasks/${b.id}`)).status).toBe(200);expect(await events(a.id)).toHaveLength(2);
+  });
+  it('empties all pages and priorities but preserves tasks changed after confirmation', async () => {
+    const ids=[];for(let i=0;i<53;i++)ids.push((await trash({priority:i%2?'high':'low'})).id);
+    const live=await add();const summary=(await api('/trash/summary')).body;expect(summary.count).toBe(53);
+    const newer=await trash();const again=(await db.prepare('SELECT id,version FROM tasks WHERE id=?').bind(ids[52]).first<{id:string;version:number}>())!;
+    const restored=(await api(`/tasks/${again.id}/restore`,'POST',{version:again.version})).body.task;
+    const reDeleted=(await api(`/tasks/${again.id}`,'DELETE',{version:restored.version})).body.task;
+    const result=await api('/trash/empty','POST',{cutoff:summary.cutoff,confirmed:true});expect(result.body.deleted).toBe(52);
+    expect((await api('/tasks?view=trash')).body.items.map((t:any)=>t.id).sort()).toEqual([newer.id,reDeleted.id].sort());
+    expect((await api(`/tasks/${live.id}`)).status).toBe(200);
+  });
+  it('rolls back the entire purge if history cleanup fails', async () => {
+    const a=await trash();await db.prepare(`CREATE TRIGGER reject_purge BEFORE DELETE ON task_events WHEN OLD.task_id='${a.id}' BEGIN SELECT RAISE(ABORT,'simulated_purge_failure'); END`).run();
+    try{expect((await api(`/trash/${a.id}`,'DELETE',{version:a.version,confirmed:true})).status).toBe(500);expect((await api('/trash/summary')).body.count).toBe(1);expect(await events(a.id)).toHaveLength(2);expect(await db.prepare('SELECT 1 FROM purged_tasks WHERE task_id=?').bind(a.id).first()).toBeNull();}
+    finally{await db.prepare('DROP TRIGGER reject_purge').run();}
+  });
+});
+
+describe('task schedules and timeline queries', () => {
+  it('validates dates, time pairs, ordering and one-day time slots in the API and database', async () => {
+    for(const schedule of [{plannedEndDate:'2026-10-20'},{plannedDate:'2026-10-20',plannedEndDate:'2026-10-19'},{plannedDate:'2026-10-20',startTime:'09:00'},{plannedDate:'2026-10-20',startTime:'24:00',endTime:'25:00'},{plannedDate:'2026-10-20',startTime:'11:00',endTime:'10:00'},{plannedDate:'2026-10-20',plannedEndDate:'2026-10-21',startTime:'09:00',endTime:'10:00'},{plannedDate:'2026-10-20',plannedEndDate:'2026-02-30'}])expect((await api('/tasks','POST',{title:'Bad schedule',...schedule},crypto.randomUUID())).status).toBe(400);
+    const task=await add({plannedDate:'2026-10-20',startTime:'09:30',endTime:'10:15'});
+    expect((await api(`/tasks/${task.id}`,'PATCH',{version:task.version,plannedDate:null})).status).toBe(400);
+    await expect(db.prepare("UPDATE tasks SET end_time='08:00' WHERE id=?").bind(task.id).run()).rejects.toThrow();
+    expect((await api(`/tasks/${task.id}`)).body.task.startTime).toBe('09:30');
+    const cleared=await api(`/tasks/${task.id}`,'PATCH',{version:task.version,plannedDate:null,plannedEndDate:null,startTime:null,endTime:null});expect(cleared.status).toBe(200);
+  });
+  it('records schedule edits in snapshots and preserves them across Trash restoration', async () => {
+    const task=await add({plannedDate:'2026-10-20',plannedEndDate:'2026-10-23'});
+    const changed=(await api(`/tasks/${task.id}`,'PATCH',{version:1,plannedEndDate:null,startTime:'09:00',endTime:'10:00'})).body.task;
+    const log=await events(task.id);expect(JSON.parse(log[1].before_json as string).plannedEndDate).toBe('2026-10-23');expect(JSON.parse(log[1].after_json as string).startTime).toBe('09:00');
+    const deleted=(await api(`/tasks/${task.id}`,'DELETE',{version:changed.version})).body.task;
+    expect((await api(`/tasks/${task.id}/restore`,'POST',{version:deleted.version})).body.task).toMatchObject({startTime:'09:00',endTime:'10:00',plannedDate:'2026-10-20'});
+  });
+  it('returns overlapping multi-day tasks, dates and times with filters before pagination', async () => {
+    const spanning=await add({title:'Long plan',plannedDate:'2026-10-01',plannedEndDate:'2026-10-31',priority:'high'});
+    const timed=await add({title:'Meeting',plannedDate:'2026-10-20',startTime:'08:00',endTime:'09:00'});
+    await add({plannedDate:'2026-10-18'});await add({plannedDate:'2026-10-26'});await add();
+    const deleted=await add({plannedDate:'2026-10-20'});await api(`/tasks/${deleted.id}`,'DELETE',{version:1});
+    const page=await api('/timeline?from=2026-10-19&to=2026-10-25');expect(page.body.items.map((t:any)=>t.id)).toEqual([spanning.id,timed.id]);expect(page.body.unscheduledCount).toBe(1);
+    expect((await api('/timeline?from=2026-10-19&to=2026-10-25&priority=high')).body.items.map((t:any)=>t.id)).toEqual([spanning.id]);
+    expect((await api('/timeline?from=2026-10-19&to=2026-10-25&q=meeting')).body.items.map((t:any)=>t.id)).toEqual([timed.id]);
+    expect((await api('/timeline?from=2026-10-25&to=2026-10-19')).status).toBe(400);expect((await api('/timeline?from=2026-01-01&to=2026-12-31')).status).toBe(400);
+  });
+  it('paginates schedules with tied dates and rejects range/filter cursor reuse', async () => {
+    for(let i=0;i<103;i++)await add({plannedDate:'2026-10-20'});
+    const first=await api('/timeline?from=2026-10-19&to=2026-10-25');expect(first.body.items).toHaveLength(100);
+    const next='&cursor='+encodeURIComponent(first.body.nextCursor);
+    const second=await api('/timeline?from=2026-10-19&to=2026-10-25'+next);expect(second.body.items).toHaveLength(3);expect(new Set([...first.body.items,...second.body.items].map((t:any)=>t.id)).size).toBe(103);
+    expect((await api('/timeline?from=2026-10-20&to=2026-10-25'+next)).status).toBe(400);expect((await api('/timeline?from=2026-10-19&to=2026-10-25&priority=high'+next)).status).toBe(400);
+  });
+  it('preserves create retries from before schedule fields existed', async () => {
+    const key=crypto.randomUUID();const created=await api('/tasks','POST',{title:'Legacy capture',plannedDate:'2026-10-20'},key);
+    await db.prepare("UPDATE tasks SET creation_payload=json_remove(creation_payload,'$.plannedEndDate','$.startTime','$.endTime') WHERE id=?").bind(created.body.task.id).run();
+    expect((await api('/tasks','POST',{title:'Legacy capture',plannedDate:'2026-10-20'},key)).status).toBe(200);
+    expect((await api('/tasks','POST',{title:'Legacy capture',plannedDate:'2026-10-20',startTime:'09:00',endTime:'10:00'},key)).status).toBe(409);
   });
 });

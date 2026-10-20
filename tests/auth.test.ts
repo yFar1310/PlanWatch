@@ -32,7 +32,7 @@ beforeAll(() => {
   });
 });
 afterAll(() => { vi.restoreAllMocks(); });
-beforeEach(async () => { await testEnv.DB.batch([testEnv.DB.prepare('DELETE FROM usage_sessions'), testEnv.DB.prepare('DELETE FROM invitations'), testEnv.DB.prepare('DELETE FROM workspaces'), testEnv.DB.prepare('DELETE FROM tasks'), testEnv.DB.prepare('DELETE FROM task_events')]); });
+beforeEach(async () => { await testEnv.DB.batch([testEnv.DB.prepare('DELETE FROM usage_sessions'), testEnv.DB.prepare('DELETE FROM invitations'), testEnv.DB.prepare('DELETE FROM workspaces'), testEnv.DB.prepare('DELETE FROM tasks'), testEnv.DB.prepare('DELETE FROM task_events'), testEnv.DB.prepare('DELETE FROM purged_tasks')]); });
 
 describe('personal Clerk authentication', () => {
   it('returns a local session only on loopback with the local flag', async () => {
@@ -311,5 +311,25 @@ describe('administration pagination and transactional enrollment', () => {
     const row=await testEnv.DB.prepare('SELECT redeemed_at FROM invitations WHERE id=?').bind(invitation.invitation.id).first();
     expect(row?.redeemed_at).toBeNull();
     expect((await request('/invitations/accept',friend,'POST',{code:invitation.code,displayName:'Friend',usageAcknowledged:true})).status).toBe(201);
+  });
+});
+
+describe('private Trash and timeline boundaries', () => {
+  it('keeps permanent deletion, empty Trash and schedules inside the signed-in workspace', async () => {
+    const admin=await token(),alice=await joinUser(admin,'user_Alice'),bob=await joinUser(admin,'user_Bob');
+    const a=(await request('/tasks',alice.jwt,'POST',{title:'Alice schedule',plannedDate:'2026-10-20',startTime:'09:00',endTime:'10:00'})).data.task;
+    const b=(await request('/tasks',bob.jwt,'POST',{title:'Bob schedule',plannedDate:'2026-10-20'})).data.task;
+    const page=(await request('/timeline?from=2026-10-19&to=2026-10-25',alice.jwt)).data;
+    expect(page.items.map((t:any)=>t.id)).toEqual([a.id]);expect(JSON.stringify(page)).not.toContain('Bob schedule');
+    const deletedA=(await request(`/tasks/${a.id}`,alice.jwt,'DELETE',{version:a.version})).data.task;
+    const deletedB=(await request(`/tasks/${b.id}`,bob.jwt,'DELETE',{version:b.version})).data.task;
+    expect((await request(`/trash/${b.id}`,alice.jwt,'DELETE',{version:deletedB.version,confirmed:true})).status).toBe(409);
+    expect((await request('/trash/purge',alice.jwt,'POST',{items:[{id:a.id,version:deletedA.version},{id:b.id,version:deletedB.version}],confirmed:true})).status).toBe(409);
+    expect((await request('/trash/summary',alice.jwt)).data.count).toBe(1);expect((await request('/trash/summary',bob.jwt)).data.count).toBe(1);
+    const summary=(await request('/trash/summary',alice.jwt)).data;
+    expect((await request('/trash/empty',alice.jwt,'POST',{cutoff:summary.cutoff,confirmed:true})).data.ids).toEqual([a.id]);
+    expect((await request('/trash/summary',bob.jwt)).data.count).toBe(1);
+    const bobHistory=await testEnv.DB.prepare('SELECT count(*) AS count FROM task_events WHERE owner_id=? AND task_id=?').bind(bob.session.workspaceId,b.id).first<{count:number}>();expect(bobHistory?.count).toBe(2);
+    expect((await request('/timeline?from=2026-10-19&to=2026-10-25',alice.jwt)).data.items).toHaveLength(0);
   });
 });

@@ -47,11 +47,12 @@ Tasks persist under `.wrangler/state/` in this checkout; do not delete that dire
 - Today opens by default with open work planned for today or earlier, using Europe/Paris calendar days.
 - Title-only task capture with Medium as the default priority, optional planned days, Today/Tomorrow/No date shortcuts, editable notes and time estimates, explicit status/completion, and actual time spent.
 - Tasks with Open/Done/All and Urgent/High/Medium/Low filters and database search across titles and notes, including records beyond the loaded page.
-- Durable Trash with search and restoration after refresh, plus undo for the last deletion. Trash is ordered by deletion time.
+- Durable Trash with search, restoration and undo. Permanent deletion supports individual tasks, multi-selection and emptying the entire Trash, with confirmation and workspace/version checks.
 - A sun/moon button switches directly between light and dark, with the choice saved on this device and applied before the first app render. The initial appearance follows the system until a choice is made.
 - Capture and task-edit drafts survive refresh in browser storage when available. Save conflicts retain drafts and offer an explicit choice to use the saved version.
 - Real D1 persistence, full activity snapshots, duplicate-create protection, and stale-edit checks.
-- Optional prerequisite selection at capture/edit time, dependency validation in the database, and completion blocked until the prerequisite is done. The map comes later.
+- Optional prerequisite selection at capture/edit time, dependency validation in the database, and completion blocked until the prerequisite is done. A Gantt timeline displays date spans and dependencies; a week calendar displays all-day and timed tasks. The broader task/goal map comes later.
+- Optional end dates and one-day start/end times, with direct task creation/editing in the timeline. See [timeline and Trash](docs/TIMELINE-AND-TRASH.md).
 - Desktop workspace with Tailwind CSS, a collapsible sidebar, sticky navigation, centered content, and keyboard search (Cmd/Ctrl K). The sidebar preference stays on the device and does not discard task drafts. Existing mobile styles remain in place below the 721px desktop breakpoint.
 - Responsive interface with labeled controls, keyboard focus states, and reduced-motion support. Browser visual and interaction review is still pending.
 - Install manifest, home-screen icons, safe-area layouts, installation guidance, and an offline screen. Private task/session responses are never cached by the service worker.

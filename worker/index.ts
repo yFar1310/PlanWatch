@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import { ZodError, z } from 'zod';
-import { createSchema, patchSchema, versionSchema, idSchema, Problem, listTasks, getTask, createTask, updateTask, setDeleted } from './tasks';
+import { createSchema, patchSchema, versionSchema, idSchema, Problem, listTasks, getTask, createTask, updateTask, setDeleted, listTimeline } from './tasks';
 import { authenticate, AuthError, type AuthBindings, type Session, type Identity } from './auth';
 
+import { trashSummary, purgeTasks, purgeSchema, emptyTrash, emptySchema } from './trash';
 import { resolveWorkspace, requireAdmin, acceptInvitation, acceptSchema, createInvitation, invitationSchema, revokeInvitation, setMemberStatus, memberStatusSchema, recordActivity, activitySchema, dashboard } from './workspaces';
 
 export interface Bindings extends AuthBindings { DB: D1Database }
@@ -78,6 +79,14 @@ app.get('/api/session', (c) => {
   const { mode, email, expiresAt, workspaceId, displayName, canAdmin } = c.get('session');
   return c.json({ mode, email, expiresAt, workspaceId, displayName, canAdmin });
 });
+app.get('/api/timeline', async c => c.json(await listTimeline(c.env.DB,c.get('session').ownerId,new URL(c.req.url).searchParams)));
+app.get('/api/trash/summary', async c => c.json(await trashSummary(c.env.DB,c.get('session').ownerId)));
+app.post('/api/trash/purge', async c => c.json(await purgeTasks(c.env.DB,c.get('session').ownerId,await body(c,purgeSchema))));
+app.delete('/api/trash/:id', async c => {
+  const value=await body(c,z.object({version:z.number().int().positive(),confirmed:z.literal(true)}).strict());
+  return c.json(await purgeTasks(c.env.DB,c.get('session').ownerId,{items:[{id:idSchema.parse(c.req.param('id')),version:value.version}],confirmed:true}));
+});
+app.post('/api/trash/empty', async c => c.json(await emptyTrash(c.env.DB,c.get('session').ownerId,(await body(c,emptySchema)).cutoff)));
 app.get('/api/tasks', async (c) => c.json(await listTasks(c.env.DB, c.get('session').ownerId, new URL(c.req.url).searchParams)));
 app.get('/api/tasks/:id', async (c) => c.json({ task: await getTask(c.env.DB, c.get('session').ownerId, idSchema.parse(c.req.param('id'))) }));
 app.post('/api/tasks', async (c) => {
@@ -100,6 +109,7 @@ app.onError((error, c) => {
   if (error instanceof Problem) return c.json({ error: error.code, message: error.message }, error.status);
   if (error instanceof ZodError) return c.json({ error: 'validation', message: error.issues[0]?.message ?? 'Check the task fields.' }, 400);
   const detail = `${error.message} ${error.cause instanceof Error ? error.cause.message : ''}`;
+  if (detail.includes('invalid_schedule')) return c.json({ error:'invalid_schedule',message:'Check the planned dates and start/end times.' },400);
   if (detail.includes('dependency_incomplete')) return c.json({ error: 'dependency_incomplete', message: 'Complete the prerequisite first, or remove this dependency before finishing the task.' }, 409);
   if (detail.includes('dependency_cycle')) return c.json({ error: 'dependency_cycle', message: 'This dependency would create a loop. Choose another task.' }, 400);
   if (detail.includes('dependency_not_found')) return c.json({ error: 'dependency_not_found', message: 'That dependency is unavailable.' }, 400);

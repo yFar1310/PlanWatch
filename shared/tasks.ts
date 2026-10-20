@@ -14,6 +14,9 @@ export interface Task {
   actualMinutes: number | null;
   dependsOn: string | null;
   plannedDate: string | null;
+  plannedEndDate: string | null;
+  startTime: string | null;
+  endTime: string | null;
   createdAt: number;
   updatedAt: number;
   completedAt: number | null;
@@ -23,3 +26,6 @@ export interface Task {
 
 export interface TaskPage { items: Task[]; nextCursor: string | null }
 export interface ApiProblem { error: string; message: string }
+
+export interface TimelinePage extends TaskPage { unscheduledCount: number }
+export interface TrashSummary { count: number; cutoff: number }

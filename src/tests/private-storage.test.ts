@@ -6,7 +6,7 @@ afterEach(() => { deactivateDrafts(); clearInvitation(); });
 describe('private drafts and invitation handoff', () => {
   it('keeps each account’s drafts isolated through sign-out, account changes and reload', () => {
     activateDrafts('workspace-alice'); capture.value.title='Alice private draft';
-    drafts.value['alice-task']={title:'Private edit',notes:'Secret',status:'todo',priority:'high',dependsOn:null,plannedDate:'',estimate:'',actual:'',version:1};
+    drafts.value['alice-task']={plannedEndDate:'',startTime:'',endTime:'',title:'Private edit',notes:'Secret',status:'todo',priority:'high',dependsOn:null,plannedDate:'',estimate:'',actual:'',version:1};
     deactivateDrafts(); expect(capture.value.title).toBe(''); expect(drafts.value).toEqual({});
     activateDrafts('workspace-bob'); expect(capture.value.title).toBe(''); expect(drafts.value).toEqual({});
     capture.value.title='Bob draft';
