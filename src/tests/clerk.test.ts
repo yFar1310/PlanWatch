@@ -293,3 +293,30 @@ describe('capture retries across the priority migration', () => {
     expect(JSON.parse(request[1].body)).toMatchObject({title:'Unconfirmed task',priority:'medium',dependsOn:null});
   });
 });
+
+describe('desktop drawer and navigation shortcuts', () => {
+  it('remembers the collapsed drawer without discarding a draft or changing the current view', async () => {
+    signedIn(); wrapper=mount(ClerkGate); await flushPromises();
+    await wrapper.get('[aria-label="New task title"]').setValue('Keep this draft');
+    await wrapper.get('[aria-label="Close sidebar"]').trigger('click');
+    expect(wrapper.get('[aria-label="Open sidebar"]').attributes('aria-expanded')).toBe('false');
+    expect(localStorage.getItem('planwatch:sidebar-collapsed')).toBe('true');
+    expect(wrapper.get<HTMLInputElement>('[aria-label="New task title"]').element.value).toBe('Keep this draft');
+    wrapper.unmount(); wrapper=mount(ClerkGate); await flushPromises();
+    expect(wrapper.get('[aria-label="Open sidebar"]').attributes('aria-expanded')).toBe('false');
+    await wrapper.get('[aria-label="Open sidebar"]').trigger('click');
+    expect(wrapper.get('[aria-label="Close sidebar"]').attributes('aria-expanded')).toBe('true');
+    expect(wrapper.get<HTMLInputElement>('[aria-label="New task title"]').element.value).toBe('Keep this draft');
+  });
+  it('moves between search and capture with keyboard focus while preserving task drafts', async () => {
+    signedIn(); wrapper=mount(ClerkGate,{attachTo:document.body}); await flushPromises();
+    await wrapper.get('[aria-label="New task title"]').setValue('A task to keep');
+    document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true,cancelable:true}));
+    await flushPromises();
+    expect(document.activeElement).toBe(wrapper.get('.search-control input').element);
+    expect(wrapper.get('.workspace-nav button[aria-current="page"]').text()).toBe('Tasks');
+    await button('New task').trigger('click'); await flushPromises();
+    expect(document.activeElement).toBe(wrapper.get('[aria-label="New task title"]').element);
+    expect(wrapper.get<HTMLInputElement>('[aria-label="New task title"]').element.value).toBe('A task to keep');
+  });
+});

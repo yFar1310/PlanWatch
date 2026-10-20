@@ -23,7 +23,7 @@ The original app and database volumes remain available in the original checkout.
 
 ## Technical direction
 
-Cloudflare-first: Vue, TypeScript, Hono, Workers, and a D1 feasibility prototype. R2, Workers AI, scheduled Workflows, email, and Durable Objects are added only as their features are implemented. The database choice must pass the reliability and budget checks before any data migration; managed PostgreSQL remains the fallback if required.
+Cloudflare-first: Vue, TypeScript, Tailwind CSS, Hono, Workers, and a D1 feasibility prototype. R2, Workers AI, scheduled Workflows, email, and Durable Objects are added only as their features are implemented. The database choice must pass the reliability and budget checks before any data migration; managed PostgreSQL remains the fallback if required.
 
 The development workflow uses Wrangler/Vite. Hosted previews use Cloudflare Pages for Vue, a separate Hono Worker and D1, and Clerk Hobby for authentication. Docker is not required. Dedicated preview resources are provisioned; paid plans, AI requests, and report email delivery are not enabled.
 
@@ -52,6 +52,7 @@ Tasks persist under `.wrangler/state/` in this checkout; do not delete that dire
 - Capture and task-edit drafts survive refresh in browser storage when available. Save conflicts retain drafts and offer an explicit choice to use the saved version.
 - Real D1 persistence, full activity snapshots, duplicate-create protection, and stale-edit checks.
 - Optional prerequisite selection at capture/edit time, dependency validation in the database, and completion blocked until the prerequisite is done. The map comes later.
+- Desktop workspace with Tailwind CSS, a collapsible sidebar, sticky navigation, centered content, and keyboard search (Cmd/Ctrl K). The sidebar preference stays on the device and does not discard task drafts. Existing mobile styles remain in place below the 721px desktop breakpoint.
 - Responsive interface with labeled controls, keyboard focus states, and reduced-motion support. Browser visual and interaction review is still pending.
 - Install manifest, home-screen icons, safe-area layouts, installation guidance, and an offline screen. Private task/session responses are never cached by the service worker.
 - Connection/session feedback, disabled saves while offline or signed out, and an explicit action for app updates.

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { CalendarDays, Check, ChevronDown, CircleCheck, Download, ListTodo, LoaderCircle, LogOut, Moon, Plus, RefreshCw, RotateCcw, Search, Shield, Sun, Trash2, WifiOff, X } from '@lucide/vue';
+import { CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, Download, ListTodo, LoaderCircle, LockKeyhole, LogOut, Moon, PanelLeft, Plus, RefreshCw, RotateCcw, Search, Shield, Sun, Trash2, WifiOff, X } from '@lucide/vue';
 import { priorities, type TaskPriority, type Task, type TaskPage } from '../shared/tasks';
 import type { SessionInfo } from '../shared/session';
 import { currentDay, formatDay, nextDay, TIME_ZONE } from '../shared/calendar';
@@ -18,6 +18,14 @@ defineProps<{ accountId?: string }>();
 const emit = defineEmits<{ signOut: []; signIn: [] }>();
 type View = 'today' | 'tasks' | 'trash' | 'admin';
 const view = ref<View>('today');
+const viewLabel = computed(() => ({ today: 'Today', tasks: 'All tasks', trash: 'Trash', admin: 'Administration' })[view.value]);
+const sidebarKey = 'planwatch:sidebar-collapsed';
+const sidebarCollapsed = ref(false);
+try { sidebarCollapsed.value = localStorage.getItem(sidebarKey) === 'true'; } catch { /* The drawer works without storage. */ }
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value;
+  try { localStorage.setItem(sidebarKey, String(sidebarCollapsed.value)); } catch { /* Keep the choice for this page. */ }
+}
 const status = ref<'open' | 'done' | 'all'>('open');
 const search = ref('');
 const priorityFilter = ref<TaskPriority | 'all'>('all');
@@ -44,6 +52,7 @@ const { canInstall, help: installHelp, install, update: appUpdate, applyUpdate, 
 const today = ref(currentDay());
 const { isDark, toggle: toggleTheme } = useTheme();
 const titleInput = ref<HTMLInputElement | null>(null);
+const searchInput = ref<HTMLInputElement | null>(null);
 const listRegion = ref<HTMLElement | null>(null);
 const heading = computed(() => view.value === 'today' ? 'A little focus for today.' : view.value === 'trash' ? 'Room to reconsider.' : 'Everything in one place.');
 const description = computed(() => view.value === 'today' ? `${formatDay(today.value)} · Today and overdue · ${TIME_ZONE}` : view.value === 'trash' ? 'Deleted tasks stay here. Restore them whenever you need.' : 'Your plans, in progress and at your own pace.');
@@ -168,6 +177,21 @@ async function run(action: () => Promise<void>, allowWhileLoading = false) {
   } finally { busy.value = false; }
 }
 function chooseView(value: View) { if (!busy.value) { view.value = value; search.value = ''; } }
+async function beginTask() {
+  chooseView('today');
+  await nextTick();
+  titleInput.value?.focus();
+}
+async function focusSearch() {
+  chooseView('tasks');
+  await nextTick();
+  searchInput.value?.focus();
+}
+function keyboardShortcut(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && authState.value === 'ready' && !busy.value && !completion.value) {
+    event.preventDefault(); void focusSearch();
+  }
+}
 async function focusList() {
   await nextTick();
   const target = listRegion.value?.querySelector<HTMLButtonElement>('button.task-title:not(:disabled), button.restore-button:not(:disabled)');
@@ -280,6 +304,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', visibilityChanged);
   document.addEventListener('pointerdown', interacted, { passive: true });
   document.addEventListener('keydown', interacted);
+  document.addEventListener('keydown', keyboardShortcut);
   window.addEventListener('online', wentOnline);
   window.addEventListener('offline', wentOffline);
   window.addEventListener('pageshow', returnedToPage);
@@ -292,6 +317,7 @@ onUnmounted(() => {
   document.removeEventListener('visibilitychange', visibilityChanged);
   document.removeEventListener('pointerdown', interacted);
   document.removeEventListener('keydown', interacted);
+  document.removeEventListener('keydown', keyboardShortcut);
   deactivateDrafts();
   window.removeEventListener('online', wentOnline);
   window.removeEventListener('offline', wentOffline);
@@ -301,23 +327,35 @@ onUnmounted(() => {
 
 <template>
   <ConfirmDialog v-if="completion && authState === 'ready'" title="Done with this task?" :description="`Mark “${completion.task.title}” as complete? You can reopen it later.${completion.task.dependsOn && completion.task.dependencyStatus !== 'done' ? ' Its prerequisite must be completed first.' : ''}`" :busy="busy" @confirm="confirmCompletion" @cancel="completion = null" />
-  <div class="app-shell">
-    <aside class="sidebar">
-      <a href="/" class="brand" aria-label="PlanWatch home"><span class="brand-icon"><Check :size="21" :stroke-width="3" /></span>PlanWatch<span class="version">2.0</span></a>
-      <div class="workspace-label">YOUR SPACE</div>
-      <nav class="workspace-nav" aria-label="Workspace">
+  <a class="skip-link" href="#workspace-content">Skip to workspace</a>
+  <div class="app-shell desktop:bg-canvas">
+    <aside id="workspace-sidebar" class="sidebar desktop:inset-y-0 desktop:left-0 desktop:z-30 desktop:w-[260px] desktop:overflow-y-auto desktop:border-0 desktop:bg-sidebar desktop:p-4 desktop:pt-6" :class="{ 'desktop:hidden': sidebarCollapsed }">
+      <a href="/" class="brand desktop:px-3 desktop:text-lg" aria-label="PlanWatch home"><span class="brand-icon"><Check :size="21" :stroke-width="3" /></span>PlanWatch<span class="version">2.0</span></a>
+      <div class="hidden desktop:mt-8 desktop:grid desktop:gap-1">
+        <button class="sidebar-action" type="button" :disabled="busy || authState !== 'ready'" @click="beginTask"><Plus :size="18" />New task</button>
+        <button class="sidebar-action" type="button" :disabled="busy || authState !== 'ready'" @click="focusSearch"><Search :size="18" />Search tasks<kbd class="ml-auto text-[10px] font-normal text-muted">⌘ / Ctrl K</kbd></button>
+      </div>
+      <div class="workspace-label desktop:mb-2 desktop:mt-8 desktop:px-3 desktop:tracking-widest">YOUR SPACE</div>
+      <nav class="workspace-nav desktop:gap-1" aria-label="Workspace">
         <button v-for="item in ([{ id: 'today', title: 'Today', icon: CalendarDays }, { id: 'tasks', title: 'Tasks', icon: ListTodo }, { id: 'trash', title: 'Trash', icon: Trash2 }] as const)" :key="item.id" :class="{ active: view === item.id }" :aria-current="view === item.id ? 'page' : undefined" :disabled="busy" @click="chooseView(item.id)"><component :is="item.icon" :size="19" />{{ item.title }}</button>
         <button v-if="session?.canAdmin" :class="{ active: view === 'admin' }" :aria-current="view === 'admin' ? 'page' : undefined" :disabled="busy" @click="chooseView('admin')"><Shield :size="19" />Administration</button>
       </nav>
-      <div class="sidebar-note"><span class="small-dot"></span> One step at a time<p>A little less to remember.<br>A little more room to focus.</p></div>
-      <div class="preview-label">{{ accountId ? 'Private workspace' : 'Local preview' }}<span>Plan a little. Focus a little.</span></div>
+      <div class="sidebar-note desktop:hidden"><span class="small-dot"></span> One step at a time<p>A little less to remember.<br>A little more room to focus.</p></div>
+      <div class="preview-label desktop:hidden">{{ accountId ? 'Private workspace' : 'Local preview' }}<span>Plan a little. Focus a little.</span></div>
+      <div class="hidden desktop:mt-auto desktop:flex desktop:items-center desktop:gap-3 desktop:rounded-xl desktop:border desktop:border-solid desktop:border-line desktop:bg-canvas/60 desktop:p-3">
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-selected text-sm font-semibold text-accent" aria-hidden="true">{{ session?.displayName?.charAt(0).toUpperCase() || 'P' }}</span>
+        <div class="min-w-0"><p class="m-0 truncate text-sm font-medium text-ink">{{ session?.displayName || 'Your workspace' }}</p><p class="m-0 mt-1 flex items-center gap-1.5 text-xs font-normal text-muted"><LockKeyhole :size="11" />{{ accountId ? 'Private workspace' : 'Local preview' }}</p></div>
+      </div>
     </aside>
 
-    <main>
-      <header class="topbar">
-        <span class="workspace-heading">Your personal workspace</span>
-        <div class="topbar-actions">
-          <span class="local-badge"><component v-if="!online" :is="WifiOff" :size="15" /><span v-else class="small-dot"></span>{{ !online ? 'Offline' : session?.mode === 'clerk' ? 'Private workspace' : 'On this computer' }}</span>
+    <main id="workspace-content" tabindex="-1" class="desktop:min-w-0 desktop:flex-1 desktop:w-auto desktop:transition-[margin-left] desktop:duration-200 motion-reduce:transition-none" :class="sidebarCollapsed ? 'desktop:ml-0' : 'desktop:ml-[260px]'">
+      <header class="topbar desktop:sticky desktop:top-0 desktop:z-20 desktop:h-[72px] desktop:border-0 desktop:bg-canvas/90 desktop:px-6 desktop:backdrop-blur-xl">
+        <div class="hidden desktop:flex desktop:min-w-0 desktop:items-center desktop:gap-3">
+          <button class="icon-button drawer-toggle" type="button" :aria-label="sidebarCollapsed ? 'Open sidebar' : 'Close sidebar'" :title="sidebarCollapsed ? 'Open sidebar' : 'Close sidebar'" :aria-expanded="!sidebarCollapsed" aria-controls="workspace-sidebar" @click="toggleSidebar"><PanelLeft :size="20" /></button>
+          <div class="flex min-w-0 items-center gap-2.5"><span class="text-sm font-semibold text-ink">PlanWatch</span><ChevronRight :size="13" class="text-muted" /><span class="truncate text-sm text-muted">{{ viewLabel }}</span></div>
+        </div>
+        <div class="topbar-actions desktop:gap-2">
+          <span class="local-badge desktop:mr-3"><component v-if="!online" :is="WifiOff" :size="15" /><span v-else class="small-dot"></span>{{ !online ? 'Offline' : session?.mode === 'clerk' ? 'Private workspace' : 'On this computer' }}</span>
           <button v-if="canInstall" class="icon-button" type="button" aria-label="Install PlanWatch" title="Install PlanWatch" @click="install"><Download :size="19" /></button>
           <button v-if="accountId" class="icon-button sign-out" type="button" :disabled="busy" aria-label="Sign out" title="Sign out" @click="clearPrivateView(); deactivateDrafts(); emit('signOut')"><LogOut :size="18" /></button>
           <button class="theme-toggle" type="button" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme">
@@ -325,7 +363,7 @@ onUnmounted(() => {
           </button>
         </div>
       </header>
-      <div class="content">
+      <div class="content desktop:mt-12 desktop:mb-12 desktop:mx-auto desktop:w-full desktop:px-10" :class="view === 'admin' ? 'desktop:max-w-[1140px]' : 'desktop:max-w-[1000px]'">
         <section v-if="authState === 'invite' || authState === 'banned'" class="admin-card enrollment" aria-labelledby="access-title">
           <h1 id="access-title">{{ authState === 'banned' ? 'Access paused' : 'Your own private workspace' }}</h1>
           <p v-if="authState === 'banned'">Your account has been banned. Contact the administrator to restore access. Your tasks are preserved.</p>
@@ -341,7 +379,7 @@ onUnmounted(() => {
         <AdminPanel v-else-if="view === 'admin' && session?.canAdmin && authState === 'ready'" @failure="showError" />
         <template v-else>
         <div class="heading-row">
-          <div><p class="eyebrow">{{ view === 'today' ? 'MAKE ROOM FOR WHAT MATTERS' : view === 'trash' ? 'NOTHING LOST IN A CLICK' : 'YOUR PLANS, YOUR PACE' }}</p><h1>{{ heading }}</h1><p class="intro">{{ description }}</p></div>
+          <div><p class="eyebrow desktop:hidden">{{ view === 'today' ? 'MAKE ROOM FOR WHAT MATTERS' : view === 'trash' ? 'NOTHING LOST IN A CLICK' : 'YOUR PLANS, YOUR PACE' }}</p><h1><span class="desktop:hidden">{{ heading }}</span><span class="hidden desktop:inline">{{ viewLabel }}</span></h1><p class="intro">{{ description }}</p></div>
           <button class="icon-button refresh" aria-label="Refresh tasks" :disabled="busy || loading" @click="reload"><RefreshCw :size="18" :class="{ spin: loading }" /></button>
         </div>
 
@@ -353,7 +391,7 @@ onUnmounted(() => {
         <p v-if="registrationError" class="capture-hint">The offline screen could not be prepared. You can keep using PlanWatch online.</p>
 
         <template v-if="view !== 'trash' && authState === 'ready'">
-          <form class="capture" @submit.prevent="add">
+          <form class="capture desktop:rounded-2xl" @submit.prevent="add">
             <div class="capture-main"><Plus :size="22" aria-hidden="true" /><input ref="titleInput" v-model="capture.title" aria-label="New task title" placeholder="What would you like to do?" maxlength="200" required aria-describedby="capture-help" :disabled="busy" /><button class="primary" :disabled="!canWrite || !capture.title.trim() || busy" type="submit"><Plus :size="17" /><span>Add task</span></button></div>
             <div class="capture-options"><label class="priority-select">Priority<select v-model="capture.priority" :disabled="busy"><option v-for="priority in priorities" :key="priority" :value="priority">{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</option></select></label><DependencyPicker v-model="capture.dependsOn" :disabled="busy || !canWrite" @failure="showError" /></div>
             <fieldset class="capture-schedule" :disabled="busy"><label class="capture-date"><CalendarDays :size="15" /><span class="sr-only">Planned day for new task, optional</span><input v-model="capture.plannedDate" type="date" min="0001-01-01" max="9999-12-31" /></label><button class="date-chip" type="button" @click="capture.plannedDate = today">Today</button><button class="date-chip" type="button" @click="capture.plannedDate = nextDay(today)">Tomorrow</button><button class="date-chip" type="button" @click="capture.plannedDate = ''">No date</button></fieldset>
@@ -364,11 +402,14 @@ onUnmounted(() => {
         <div v-if="error && authState !== 'signin'" role="alert" class="error-message">{{ error }} <button :disabled="busy || loading || !online" @click="reload">Refresh tasks</button></div>
         <div class="status-message" role="status" aria-live="polite"><span>{{ notice || (busy ? 'Saving…' : '') }}</span><button v-if="lastDeleted" class="undo-button" :disabled="!canWrite || busy || loading" @click="restore(lastDeleted)"><RotateCcw :size="15" />Undo last delete</button></div>
 
-        <label v-if="authState === 'ready'" class="priority-filter">Filter by priority<select v-model="priorityFilter" :disabled="busy"><option value="all">All priorities</option><option v-for="priority in priorities" :key="priority" :value="priority">{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</option></select></label>
-        <div class="list-toolbar">
-          <div v-if="view === 'tasks'" class="filters" aria-label="Filter tasks"><button v-for="option in (['open', 'done', 'all'] as const)" :key="option" :aria-pressed="status === option" :class="{ active: status === option }" :disabled="busy" @click="status = option">{{ option === 'open' ? 'Open' : option === 'done' ? 'Done' : 'All' }}</button></div>
-          <h2 v-else class="section-label">{{ view === 'today' ? 'Your next steps' : 'Deleted tasks' }}</h2>
-          <label v-if="authState === 'ready'" class="search-control"><Search :size="16" /><span class="sr-only">Search {{ view === 'trash' ? 'Trash' : view === 'today' ? 'Today' : 'tasks' }}</span><input v-model="search" type="search" maxlength="200" :placeholder="view === 'trash' ? 'Search Trash…' : 'Search tasks…'" :disabled="busy" /><button v-if="search" type="button" class="icon-button" aria-label="Clear search" :disabled="busy" @click="search = ''"><X :size="16" /></button></label>
+        <div class="task-controls desktop:mt-6 desktop:mb-4 desktop:flex desktop:flex-wrap desktop:items-center desktop:gap-4">
+        <label v-if="authState === 'ready'" class="priority-filter desktop:order-2 desktop:m-0 desktop:gap-2"><span class="desktop:hidden">Filter by priority</span><span class="hidden desktop:inline">Priority</span><select v-model="priorityFilter" :disabled="busy"><option value="all">All priorities</option><option v-for="priority in priorities" :key="priority" :value="priority">{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</option></select></label>
+        <div class="list-toolbar desktop:contents">
+          <div v-if="view === 'tasks'" class="filters desktop:order-1" aria-label="Filter tasks"><button v-for="option in (['open', 'done', 'all'] as const)" :key="option" :aria-pressed="status === option" :class="{ active: status === option }" :disabled="busy" @click="status = option">{{ option === 'open' ? 'Open' : option === 'done' ? 'Done' : 'All' }}</button></div>
+          <h2 v-else class="section-label desktop:order-1">{{ view === 'today' ? 'Your next steps' : 'Deleted tasks' }}</h2>
+          <label v-if="authState === 'ready'" class="search-control desktop:order-3 desktop:ml-auto desktop:mb-0 desktop:w-[235px]"><Search :size="16" /><span class="sr-only">Search {{ view === 'trash' ? 'Trash' : view === 'today' ? 'Today' : 'tasks' }}</span><input ref="searchInput" v-model="search" type="search" maxlength="200" :placeholder="view === 'trash' ? 'Search Trash…' : 'Search tasks…'" :disabled="busy" /><button v-if="search" type="button" class="icon-button" aria-label="Clear search" :disabled="busy" @click="search = ''"><X :size="16" /></button></label>
+        </div>
+
         </div>
 
         <section ref="listRegion" class="task-list" tabindex="-1" aria-label="Tasks" :aria-busy="loading || busy">
