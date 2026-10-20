@@ -19,7 +19,7 @@
     "test:ui": "vitest run --config vitest.ui.config.ts",
     "test:app-assets": "node --test scripts/tests/*.test.mjs",
     "check": "npm run typecheck && npm test && npm run build",
-    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local --config wrangler.jsonc",
     "db:backup:local": "node scripts/database.mjs backup",
     "db:verify-backup": "node scripts/database.mjs verify"
   },

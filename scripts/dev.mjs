@@ -28,7 +28,7 @@ function run(command, args) {
 }
 
 try {
-  await run('node_modules/.bin/wrangler', ['d1', 'migrations', 'apply', 'DB', '--local']);
+  await run('node_modules/.bin/wrangler', ['d1', 'migrations', 'apply', 'DB', '--local', '--config', 'wrangler.jsonc']);
   await run('node_modules/.bin/vite', process.argv.slice(2));
 } catch (error) {
   if (!(error instanceof Interrupted)) {

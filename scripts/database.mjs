@@ -34,7 +34,7 @@ try {
   const [mode, input] = process.argv.slice(2);
   if (mode === 'backup') {
     const path = resolve(backups, `planwatch-${new Date().toISOString().replaceAll(':', '-')}-${randomUUID().slice(0, 8)}.sql`);
-    await wrangler(['d1', 'export', 'DB', '--local', '--output', path]);
+    await wrangler(['d1', 'export', 'DB', '--local', '--config', 'wrangler.jsonc', '--output', path]);
     await chmod(path, 0o600);
     const bytes = await readFile(path);
     await writeFile(`${path}.json`, JSON.stringify({ format: 1, createdAt: new Date().toISOString(), bytes: bytes.length, sha256: hash(bytes) }, null, 2) + '\n', { mode: 0o600 });

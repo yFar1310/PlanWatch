@@ -14,14 +14,15 @@ afterEach(()=>{wrapper?.unmount();wrapper=undefined;vi.useRealTimers();vi.unstub
 describe('timeline and calendar interactions',()=>{
   it('shows date spans and dependencies and opens the actual task for editing',async()=>{
     const parent=task('parent',{title:'Prepare outline',plannedDate:'2026-10-18',plannedEndDate:'2026-10-21'}),child=task('child',{title:'Write chapter',plannedDate:'2026-10-22',plannedEndDate:'2026-10-25',dependsOn:parent.id,dependencyTitle:parent.title});
-    fetchMock.mockResolvedValue(json({items:[parent,child],nextCursor:null,unscheduledCount:2}));
+    fetchMock.mockImplementation(async()=>json({items:[parent,child],nextCursor:null,unscheduledCount:2}));
     wrapper=mount(TimelineView,{props:{revision:0,online:true,today:'2026-10-20'}});await settle();
-    const url=new URL(fetchMock.mock.calls[0]![0],'https://example.test');expect(url.searchParams.get('from')).toBe('2026-10-19');expect(url.searchParams.get('to')).toBe('2026-10-25');
+    await wrapper.get('[aria-label="Gantt range"]').setValue('week');await settle();
+    const url=new URL(fetchMock.mock.calls.at(-1)![0],'https://example.test');expect(url.searchParams.get('from')).toBe('2026-10-19');expect(url.searchParams.get('to')).toBe('2026-10-25');
     expect(wrapper.findAll('.gantt-bar')).toHaveLength(2);expect(wrapper.find('.gantt-arrows path').exists()).toBe(true);expect(wrapper.text()).toContain('2 matching tasks have no planned day');
     await wrapper.findAll('.gantt-bar')[1]!.trigger('click');expect(wrapper.emitted('edit')?.[0]?.[0]).toMatchObject({id:'child',dependsOn:'parent'});
   });
   it('renders overlapping timed appointments and all-day tasks in separate calendar areas',async()=>{
-    fetchMock.mockResolvedValue(json({items:[task('first',{startTime:'09:00',endTime:'10:00'}),task('second',{startTime:'09:30',endTime:'10:30'}),task('all-day',{plannedEndDate:'2026-10-22'})],nextCursor:null,unscheduledCount:0}));
+    fetchMock.mockImplementation(async()=>json({items:[task('first',{startTime:'09:00',endTime:'10:00'}),task('second',{startTime:'09:30',endTime:'10:30'}),task('all-day',{plannedEndDate:'2026-10-22'})],nextCursor:null,unscheduledCount:0}));
     wrapper=mount(TimelineView,{props:{revision:0,online:true,today:'2026-10-20'}});await settle();
     await wrapper.findAll('button').find(b=>b.text()==='Calendar')!.trigger('click');await settle();
     const timed=wrapper.findAll('.timed-event');expect(timed).toHaveLength(2);expect(timed[0]!.attributes('style')).toContain('50%');expect(timed[1]!.attributes('style')).toContain('50%');
@@ -34,7 +35,7 @@ describe('timeline and calendar interactions',()=>{
     let page=0;fetchMock.mockImplementation(async()=>json(++page===1?{items:[task('first')],nextCursor:'next-page',unscheduledCount:0}:{items:[task('second')],nextCursor:null,unscheduledCount:0}));
     wrapper=mount(TimelineView,{props:{revision:0,online:true,today:'2026-10-20'}});await settle();
     await wrapper.findAll('button').find(b=>b.text()==='Load more scheduled tasks')!.trigger('click');await flushPromises();expect(wrapper.findAll('.gantt-bar')).toHaveLength(2);expect(fetchMock.mock.calls[1]![0]).toContain('cursor=next-page');
-    fetchMock.mockResolvedValue(json({items:[],nextCursor:null,unscheduledCount:0}));await wrapper.get('[aria-label="Next period"]').trigger('click');await settle();expect(wrapper.findAll('.gantt-bar')).toHaveLength(0);expect(fetchMock.mock.calls.at(-1)?.[0]).toContain('from=2026-10-26');
+    fetchMock.mockResolvedValue(json({items:[],nextCursor:null,unscheduledCount:0}));await wrapper.get('[aria-label="Next period"]').trigger('click');await settle();expect(wrapper.findAll('.gantt-bar')).toHaveLength(0);expect(fetchMock.mock.calls.at(-1)?.[0]).toContain('from=2026-10-21');
   });
 });
 describe('schedule arithmetic',()=>{
@@ -45,5 +46,18 @@ describe('schedule arithmetic',()=>{
     const result=placeTimed([task('a',{startTime:'09:00',endTime:'12:00'}),task('b',{startTime:'09:30',endTime:'10:00'}),task('c',{startTime:'09:45',endTime:'10:30'}),task('d',{startTime:'12:00',endTime:'13:00'})]);
     expect(result.map(item=>[item.task.id,item.column,item.columns])).toEqual([['a',0,3],['b',1,3],['c',2,3],['d',0,1]]);
     expect(scheduleProblem({plannedDate:'2026-10-20',plannedEndDate:null,startTime:'10:00',endTime:'09:00'})).not.toBeNull();
+  });
+});
+
+describe('daily Gantt default and weekly dropdown',()=>{
+  it('opens on the selected day with hourly bars and switches to a full week',async()=>{
+    fetchMock.mockImplementation(async()=>json({items:[task('focus',{startTime:'09:30',endTime:'11:00'})],nextCursor:null,unscheduledCount:0}));
+    wrapper=mount(TimelineView,{props:{revision:0,online:true,today:'2026-10-20'}});await settle();
+    expect(wrapper.get<HTMLSelectElement>('[aria-label="Gantt range"]').element.value).toBe('day');
+    const daily=new URL(fetchMock.mock.calls.at(-1)![0],'https://example.test');expect(daily.searchParams.get('from')).toBe('2026-10-20');expect(daily.searchParams.get('to')).toBe('2026-10-20');
+    expect(wrapper.findAll('.gantt-header > span')).toHaveLength(25);expect(wrapper.get('.gantt-bar').attributes('style')).toContain('width: 6.25%');
+    await wrapper.get('[aria-label="Gantt range"]').setValue('week');await settle();
+    const weekly=new URL(fetchMock.mock.calls.at(-1)![0],'https://example.test');expect(weekly.searchParams.get('from')).toBe('2026-10-19');expect(weekly.searchParams.get('to')).toBe('2026-10-25');
+    expect(wrapper.findAll('.gantt-header > span')).toHaveLength(8);expect(wrapper.get('.gantt-bar').attributes('style')).toContain('grid-column');
   });
 });
