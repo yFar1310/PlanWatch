@@ -6,10 +6,12 @@ import Root from '../Root.vue';
 import { api } from '../api';
 import { activateDrafts, deactivateDrafts, capture } from '../drafts';
 import { currentDay } from '../../shared/calendar';
+import { captureInvitation,clearInvitation,pendingInvitation } from '../invitations';
 
 const auth = vi.hoisted(() => ({
   isLoaded: undefined as unknown as Ref<boolean>, isSignedIn: undefined as unknown as Ref<boolean>,
   userId: undefined as unknown as Ref<string | null>, sessionId: undefined as unknown as Ref<string | null>,
+  user: undefined as unknown as Ref<{fullName:string|null;firstName:string|null;username:string|null}|null>,
   getToken: vi.fn(), signOut: vi.fn(),
 }));
 vi.mock('../auth-config', () => ({ clerkEnabled: false, localPreview: false }));
@@ -17,9 +19,11 @@ vi.mock('@clerk/vue', async () => {
   const { ref, h } = await import('vue');
   auth.isLoaded = ref(false); auth.isSignedIn = ref(false);
   auth.userId = ref(null); auth.sessionId = ref(null);
+  auth.user = ref(null);
   return {
     useAuth: () => ({ ...auth, getToken: ref(auth.getToken) }),
     useClerk: () => ref({ signOut: auth.signOut }),
+    useUser: () => ({ user:auth.user }),
     SignIn: { setup: () => () => h('div', { 'data-testid': 'clerk-signin' }, 'Secure sign-in') },
   };
 });
@@ -34,6 +38,8 @@ function signedIn(id = 'user_Owner') {
 beforeEach(() => {
   vi.useFakeTimers();
   deactivateDrafts(); localStorage.clear();
+  clearInvitation();sessionStorage.clear();history.replaceState(null,'','/');
+  auth.user.value={fullName:'Google User',firstName:'Google',username:null};
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   vi.stubGlobal('fetch', fetchMock);
   auth.isLoaded.value = false; auth.isSignedIn.value = false; auth.userId.value = null; auth.sessionId.value = null;
@@ -45,7 +51,7 @@ beforeEach(() => {
     ? json({ workspaceId: 'personal', displayName: 'Administrator', canAdmin: true, mode: 'clerk', email: null, expiresAt: sessionExpires })
     : json({ items: [{ id: 'task-one', title: 'Private owner task', status: 'todo', version: 1, plannedDate: currentDay(), notes: null }], nextCursor: null }));
 });
-afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { wrapper?.unmount(); wrapper = undefined; clearInvitation();vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('Clerk sign-in and task workspace boundary', () => {
   it('keeps an unconfigured hosted frontend closed without requesting the database', async () => {
@@ -193,12 +199,31 @@ describe('invitations, administration and deliberate task actions', () => {
     wrapper=mount(ClerkGate); await flushPromises();
     expect(wrapper.text()).toContain('administrator can see');
     expect(fetchMock.mock.calls.some(([path])=>path.includes('/tasks'))).toBe(false);
-    const inputs=wrapper.findAll('.enrollment-form input');
-    await inputs[0]!.setValue('Friend'); await inputs[1]!.setValue('a'.repeat(43));
-    expect(button('Accept invitation').attributes('disabled')).toBeDefined();
-    await inputs[2]!.setValue(true); await wrapper.get('.enrollment-form').trigger('submit'); await flushPromises();
+    await wrapper.get('[aria-label="Display name (optional)"]').setValue('Friend'); await wrapper.get('[aria-label="Invitation link or code"]').setValue('a'.repeat(43));
+    expect(button('Join PlanWatch').attributes('disabled')).toBeDefined();
+    await wrapper.get('.usage-consent input').setValue(true); await wrapper.get('.enrollment-form').trigger('submit'); await flushPromises();
     expect(wrapper.find('[aria-label="New task title"]').exists()).toBe(true);
     expect(wrapper.text()).not.toContain('Administration');
+  });
+  it('uses the captured invitation and Google name without requiring either field again',async()=>{
+    signedIn('user_Friend');auth.user.value={fullName:'Alex Example',firstName:'Alex',username:null};
+    history.replaceState(null,'','/#invite='+'b'.repeat(43));captureInvitation();let joined=false;
+    fetchMock.mockImplementation(async(path:string,options:RequestInit)=>{
+      if(path==='/api/session')return joined?json({mode:'clerk',email:null,expiresAt:sessionExpires,workspaceId:'friend-space',displayName:'Alex Example',canAdmin:false}):json({error:'invitation_required',message:'Invitation required.'},403);
+      if(path==='/api/invitations/accept'){expect(JSON.parse(options.body as string)).toEqual({code:'b'.repeat(43),displayName:'Alex Example',usageAcknowledged:true});joined=true;return json({joined:true},201);}
+      return json(path==='/api/activity'?{recorded:true}:{items:[],nextCursor:null});
+    });
+    wrapper=mount(ClerkGate);await flushPromises();expect(wrapper.text()).toContain('Invitation link detected');expect(wrapper.text()).toContain('Joining as Alex Example');expect(wrapper.find('[aria-label="Invitation link or code"]').exists()).toBe(false);expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect(wrapper.get('[aria-label="Display name (optional)"]').attributes('required')).toBeUndefined();expect(button('Join PlanWatch').attributes('disabled')).toBeDefined();
+    await wrapper.get('.usage-consent input').setValue(true);await wrapper.get('.enrollment-form').trigger('submit');await flushPromises();expect(wrapper.find('[aria-label="New task title"]').exists()).toBe(true);expect(pendingInvitation.value).toBe('');
+  });
+  it('reacts to a newly opened invitation and offers recovery for a rejected link',async()=>{
+    signedIn('user_Friend');auth.user.value=null;
+    fetchMock.mockImplementation(async(path:string)=>path==='/api/invitations/accept'?json({error:'invalid_invitation',message:'This invitation is expired or already used.'},400):json({error:'invitation_required',message:'Invitation required.'},403));
+    wrapper=mount(ClerkGate);await flushPromises();expect(wrapper.text()).toContain('regular app address');expect(button('Join PlanWatch').attributes('disabled')).toBeDefined();
+    history.replaceState(null,'','/#invite='+'c'.repeat(43));captureInvitation();await flushPromises();expect(wrapper.find('[aria-label="Invitation link or code"]').exists()).toBe(false);expect(wrapper.text()).toContain('Joining as PlanWatch member');
+    await wrapper.get('.usage-consent input').setValue(true);await wrapper.get('.enrollment-form').trigger('submit');await flushPromises();expect(wrapper.get('[role="alert"]').text()).toContain('expired or already used');expect(fetchMock.mock.calls.filter(([path])=>path==='/api/invitations/accept')).toHaveLength(1);
+    await button('Use another invitation').trigger('click');expect(wrapper.find('[aria-label="Invitation link or code"]').exists()).toBe(true);expect(pendingInvitation.value).toBe('');
   });
   it('clears private content and drafts when a heartbeat discovers a ban', async () => {
     signedIn(); wrapper=mount(ClerkGate); await flushPromises();

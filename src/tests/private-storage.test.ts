@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it,vi } from 'vitest';
 import { activateDrafts, deactivateDrafts, capture, drafts } from '../drafts';
 import { captureInvitation, clearInvitation, pendingInvitation, invitationCode } from '../invitations';
 beforeEach(() => { deactivateDrafts(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null,'','/'); });
@@ -29,5 +29,11 @@ describe('private drafts and invitation handoff', () => {
     expect(invitationCode('https://example.test/#invite='+code)).toBe(code);
     expect(invitationCode('not a link')).toBe('');
     clearInvitation(); captureInvitation(); expect(pendingInvitation.value).toBe('');
+  });
+  it('retains the invitation through same-page auth routing when browser storage is blocked',()=>{
+    const storage=vi.spyOn(Storage.prototype,'getItem').mockImplementation(()=>{throw new Error('Blocked');});
+    const writer=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new Error('Blocked');});
+    try{const code='b'.repeat(43);history.replaceState(null,'','/#invite='+code);captureInvitation();history.replaceState(null,'','/#/sign-in');captureInvitation();expect(pendingInvitation.value).toBe(code);}
+    finally{storage.mockRestore();writer.mockRestore();}
   });
 });

@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { SignIn, useAuth, useClerk } from '@clerk/vue';
+import { SignIn, useAuth, useClerk, useUser } from '@clerk/vue';
 import { Check, LoaderCircle, Moon, Sun } from '@lucide/vue';
 import App from './App.vue';
 import { setAuthTokenProvider } from './api';
 import { deactivateDrafts } from './drafts';
 import { useTheme } from './theme';
+import { pendingInvitation } from './invitations';
 
 const { isLoaded, isSignedIn, userId, sessionId, getToken } = useAuth();
 const clerk = useClerk();
+const { user } = useUser();
+const profileName = computed(() => [user.value?.fullName,user.value?.firstName,user.value?.username].map(name=>name?.trim()).find(Boolean)?.slice(0,80) || '');
 const { isDark, toggle: toggleTheme } = useTheme();
 const slow = ref(false);
 const signingOut = ref(false);
@@ -49,14 +52,14 @@ onUnmounted(() => { clearTimeout(loadTimer); setAuthTokenProvider(async () => nu
 </script>
 
 <template>
-  <App v-if="isLoaded && isSignedIn && !signingOut" :key="`${userId}:${sessionId}`" :account-id="userId ?? undefined" @sign-out="signOut" @sign-in="signOut" />
+  <App v-if="isLoaded && isSignedIn && !signingOut" :key="`${userId}:${sessionId}`" :account-id="userId ?? undefined" :profile-name="profileName" @sign-out="signOut" @sign-in="signOut" />
   <main v-else class="auth-page">
     <button class="theme-toggle auth-theme" type="button" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme"><component :is="isDark ? Sun : Moon" :size="20" /></button>
     <section class="auth-card" aria-labelledby="signin-heading">
       <div class="auth-brand"><span class="brand-icon"><Check :size="22" :stroke-width="3" /></span><span>PlanWatch</span><span class="version">2.0</span></div>
       <p class="eyebrow">A LITTLE MORE ROOM TO FOCUS</p>
-      <h1 id="signin-heading">Your day. Your space.</h1>
-      <p>Sign in to find your tasks, wherever you are.</p>
+      <h1 id="signin-heading">{{ pendingInvitation ? 'You’re invited to PlanWatch.' : 'Your day. Your space.' }}</h1>
+      <p>{{ pendingInvitation ? 'Sign in to continue. Your invitation will be kept for the next step.' : 'Sign in to find your tasks, wherever you are.' }}</p>
       <template v-if="!isLoaded">
         <div class="auth-loading" role="status"><LoaderCircle class="spin" :size="22" />Preparing secure sign-in…</div>
         <p v-if="slow">Sign-in is taking longer than expected. Check your connection and try reloading.</p>

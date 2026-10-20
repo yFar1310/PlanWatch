@@ -19,7 +19,7 @@ import TaskEditor from './TaskEditor.vue';
 import TaskListing from './TaskListing.vue';
 import { usePwa } from './pwa';
 
-defineProps<{ accountId?: string }>();
+const props = defineProps<{ accountId?: string; profileName?:string }>();
 const emit = defineEmits<{ signOut: []; signIn: [] }>();
 type View = 'today' | 'tasks' | 'trash' | 'admin' | 'timeline';
 const view = ref<View>('today');
@@ -78,8 +78,11 @@ const lastDeleted = ref<Task | null>(null);
 const online = ref(navigator.onLine);
 const session = ref<SessionInfo | null>(null);
 const authState = ref<'loading' | 'ready' | 'signin' | 'unavailable' | 'invite' | 'banned'>('loading');
-const inviteInput = ref(pendingInvitation.value);
+const inviteInput = ref('');
+const detectedInvitation = computed(()=>invitationCode(pendingInvitation.value));
+const enrollmentCode = computed(()=>detectedInvitation.value || invitationCode(inviteInput.value));
 const displayName = ref('');
+const enrollmentName = computed(()=>displayName.value.trim() || props.profileName?.trim().slice(0,80) || 'PlanWatch member');
 const usageAcknowledged = ref(false);
 const joining = ref(false);
 const setupRequired = ref(false);
@@ -131,6 +134,7 @@ function showError(problem: unknown) {
     deactivateDrafts();
     session.value = null;
     clearPrivateView();
+    if (problem.code === 'invitation_required') error.value = '';
   }
 }
 async function checkSession() {
@@ -160,11 +164,11 @@ async function checkSession() {
 }
 async function join() {
   if (joining.value || !usageAcknowledged.value) return;
-  const code = invitationCode(inviteInput.value);
-  if (!code) { error.value = 'Paste a complete invitation link or a valid invitation code.'; return; }
+  const code = enrollmentCode.value;
+  if (!code) { error.value = 'Open the invitation link you received, or paste it below.'; return; }
   joining.value = true; error.value = '';
   try {
-    await api('/invitations/accept', 'POST', { code, displayName: displayName.value.trim(), usageAcknowledged: true });
+    await api('/invitations/accept', 'POST', { code, displayName: enrollmentName.value, usageAcknowledged: true });
     if (disposed) return;
     clearInvitation(); inviteInput.value = '';
     if (await checkSession()) await load();
@@ -415,14 +419,16 @@ onUnmounted(() => {
       </header>
       <div class="content desktop:mt-12 desktop:mb-12 desktop:mx-auto desktop:w-full desktop:px-10" :class="view === 'admin' ? 'desktop:max-w-[1140px]' : 'desktop:max-w-[1000px]'">
         <section v-if="authState === 'invite' || authState === 'banned'" class="admin-card enrollment" aria-labelledby="access-title">
-          <h1 id="access-title">{{ authState === 'banned' ? 'Access paused' : 'Your own private workspace' }}</h1>
+          <h1 id="access-title">{{ authState === 'banned' ? 'Access paused' : 'Welcome to PlanWatch' }}</h1>
           <p v-if="authState === 'banned'">Your account has been banned. Contact the administrator to restore access. Your tasks are preserved.</p>
           <form v-else class="enrollment-form" @submit.prevent="join">
-            <p>Ask the administrator for an invitation, then create your personal space.</p>
-            <label>Your display name<input v-model="displayName" required maxlength="80" autocomplete="nickname" :disabled="joining" /></label>
-            <label>Invitation link or code<input v-model="inviteInput" required autocomplete="off" spellcheck="false" :disabled="joining" /></label>
+            <template v-if="detectedInvitation"><p class="invitation-detected"><Check :size="18" />Invitation link detected. You don’t need to paste it again.</p><p>Your tasks will have their own private space, separate from everyone else’s.</p></template>
+            <template v-else><p>Open the invitation link you received to join. The regular app address doesn’t include an invitation.</p><details class="enrollment-fallback"><summary>I have a link to paste</summary><label>Invitation link or code<input v-model="inviteInput" aria-label="Invitation link or code" autocomplete="off" spellcheck="false" :disabled="joining" /></label></details></template>
+            <p class="enrollment-identity">Joining as <strong>{{ enrollmentName }}</strong>{{ profileName && !displayName.trim() ? ' · from your sign-in profile' : '' }}</p>
+            <details class="enrollment-fallback"><summary>Change display name (optional)</summary><label>Display name<input v-model="displayName" aria-label="Display name (optional)" :placeholder="profileName || 'PlanWatch member'" maxlength="80" autocomplete="nickname" :disabled="joining" /></label></details>
             <label class="usage-consent"><input v-model="usageAcknowledged" type="checkbox" required :disabled="joining" /><span>I understand that my tasks stay private, and the administrator can see my display name, task counts, observed sessions and estimated active time.</span></label>
-            <button class="primary" :disabled="joining || !online || !usageAcknowledged || !displayName.trim() || !inviteInput.trim()">{{ joining ? 'Creating workspace…' : 'Accept invitation' }}</button>
+            <button class="primary" :disabled="joining || !online || !usageAcknowledged || !enrollmentCode">{{ joining ? 'Joining…' : 'Join PlanWatch' }}</button>
+            <button v-if="detectedInvitation" type="button" class="enrollment-other" :disabled="joining" @click="clearInvitation();inviteInput='';error=''">Use another invitation</button>
           </form>
           <p v-if="error" class="error-message" role="alert">{{ error }}</p>
         </section>

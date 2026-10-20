@@ -3,10 +3,11 @@ export const pendingInvitation = ref('');
 const key = 'planwatch:pending-invitation';
 export function captureInvitation() {
   const match = location.hash.match(/^#invite=([A-Za-z0-9_-]{43})$/);
+  if (match) pendingInvitation.value = match[1]!;
   try {
     if (match) sessionStorage.setItem(key, match[1]!);
-    pendingInvitation.value = sessionStorage.getItem(key) ?? '';
-  } catch { if (match) pendingInvitation.value = match[1]!; }
+    if (!match) pendingInvitation.value = sessionStorage.getItem(key) || pendingInvitation.value;
+  } catch { /* Keep the captured invitation in memory when browser storage is unavailable. */ }
   if (match) history.replaceState(null, '', location.pathname + location.search);
 }
 export function clearInvitation() {
