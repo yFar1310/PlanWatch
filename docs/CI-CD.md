@@ -8,7 +8,7 @@ Successful pushes can deploy the dedicated API Worker and Pages frontend, then c
 
 Two repository settings are needed at [Settings → Secrets and variables → Actions](https://github.com/yFar1310/PlanWatch/settings/secrets/actions):
 
-1. Under **Variables**, add `PLANWATCH_PREVIEW_CONFIG`. Paste the contents of the prepared, ignored `.wrangler/github-preview-config.json` file. It contains public configuration only: account/database IDs, Clerk publishable key and owner ID, and frontend/API origins. No secret keys belong in this JSON.
+1. Under **Variables**, add `PLANWATCH_PREVIEW_CONFIG`. Paste the entire prepared, ignored `.wrangler/github-preview-config.json` file, including its opening `{` and closing `}`. Preserve the JSON quotes and commas; do not wrap it in Markdown code fences or an extra pair of quotes. It contains public configuration only: account/database IDs, Clerk publishable key and owner ID, and frontend/API origins. No secret keys belong in this JSON.
 2. Under **Secrets**, add `CLOUDFLARE_API_TOKEN`. Create a custom token in [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens), restricted to the intended account, with **Workers Scripts: Edit**, **Cloudflare Pages: Edit**, and **D1: Edit** permissions. Paste the token directly into GitHub, never into chat or source files. A global API key and Clerk secret key are not needed. Revoke/replace the token in Cloudflare/GitHub if it is ever exposed.
 
 The local Wrangler OAuth login is not a GitHub Actions credential. See [Cloudflare's CI authentication guide](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/).
