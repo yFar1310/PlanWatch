@@ -23,4 +23,22 @@ const result = await Promise.all([
   check('allowed preflight', apiOrigin + '/api/tasks', { method: 'OPTIONS', headers: { Origin: appOrigin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization,content-type,idempotency-key' } }, 204, r => r.headers.get('access-control-allow-origin') === appOrigin),
   check('other origin rejected', apiOrigin + '/api/tasks', { method: 'OPTIONS', headers: { Origin: 'https://other.example', 'Access-Control-Request-Method': 'POST' } }, 403, r => !r.headers.has('access-control-allow-origin')),
 ]);
+// The calendar is lazy loaded: checking only index.html can miss a missing JS chunk.
+async function checkCalendarAssets() {
+  try {
+    const page = await fetch(appOrigin + '/', {signal:AbortSignal.timeout(10_000)});
+    const html = await page.text(), entry = html.match(/src="(\/assets\/index-[\w-]+\.js)"/)?.[1];
+    if (!entry) throw new Error('Frontend entry script missing');
+    const module = await fetch(appOrigin + entry, {signal:AbortSignal.timeout(10_000)});
+    if (!module.ok || !module.headers.get('content-type')?.includes('javascript')) throw new Error('Frontend script unavailable');
+    const calendar = (await module.text()).match(/CalendarChart-[\w-]+\.js/)?.[0];
+    if (!calendar) throw new Error('Calendar script reference missing');
+    return await check('lazy-loaded calendar script', appOrigin + '/assets/' + calendar, {}, 200,
+      (response,body)=>!!response.headers.get('content-type')?.includes('javascript')&&!body.includes('<!DOCTYPE html>'));
+  } catch (error) {
+    console.error(`FAIL calendar assets: ${error.cause?.code ?? error.message}`);
+    return false;
+  }
+}
+result.push(await checkCalendarAssets());
 if (result.some(passed => !passed)) process.exitCode = 1;

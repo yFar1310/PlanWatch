@@ -13,7 +13,7 @@ describe('explicit scheduling proposals',()=>{
   it('does not write while finding or selecting a slot, then confirms the selected proposal once',async()=>{
     fetchMock.mockImplementation(async(path:string)=>json(path.endsWith('/suggestions')?preview:{task:{...task,plannedDate:'2099-10-21',startTime:'18:30',endTime:'19:00',version:2}}));
     wrapper=mount(ScheduleProposalDialog,{props:{task,today:'2099-10-21',online:true}});expect(fetchMock).not.toHaveBeenCalled();await wrapper.get('form').trigger('submit');await flushPromises();
-    await wrapper.get('input[value="18:30"]').setValue();expect(fetchMock.mock.calls).toHaveLength(1);expect(wrapper.text()).toContain('available window, margins and saved activity times');
+    await wrapper.get('input[value="18:30"]').setValue();expect(fetchMock.mock.calls).toHaveLength(1);expect(wrapper.text()).toContain('in chronological order');
     await wrapper.findAll('button').find(button=>button.text()==='Confirm this time')!.trigger('click');await flushPromises();expect(fetchMock.mock.calls[1]![0]).toBe('/api/planning/apply');expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toMatchObject({version:1,snapshot:12,candidateStart:'18:30'});expect(wrapper.emitted('scheduled')?.[0]?.[0]).toMatchObject({version:2});
   });
   it('invalidates old candidates when the requested duration changes',async()=>{

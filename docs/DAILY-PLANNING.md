@@ -45,3 +45,6 @@ Type checks, 104 tests and both builds pass. Component checks cover drawer persi
 ## Timeline and Trash update — 20 October 2026
 
 The Timeline view now provides Gantt Daily/Weekly date spans with dependency connectors and a week calendar with timed/all-day tasks. Optional scheduling fields are validated in the API and database. Tasks can be created or edited without leaving the timeline, including drag/drop and edge resizing through DHTMLX Community and FullCalendar Standard. TanStack Table provides sorting for loaded tasks. Trash now supports individual permanent deletion, selected batches and emptying the whole Trash, with confirmation, concurrency guards and atomic history cleanup. See [behavior, recovery and verification](TIMELINE-AND-TRASH.md). The latest suite has 141 passing tests; real-browser visual/touch checks remain open.
+
+
+Update 21 October 2026: Calendar now replaces the Gantt interface with Day/Week/Month views using FullCalendar Standard only. The earlier DHTMLX implementation has been removed. See [current scheduling behavior](SCHEDULING-LIBRARIES.md) and the [user guide](GUIDE-UTILISATEUR.md).

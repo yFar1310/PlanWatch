@@ -53,7 +53,7 @@ Tasks persist under `.wrangler/state/` in this checkout; do not delete that dire
 - A sun/moon button switches directly between light and dark, with the choice saved on this device and applied before the first app render. The initial appearance follows the system until a choice is made.
 - Capture and task-edit drafts survive refresh in browser storage when available. Save conflicts retain drafts and offer an explicit choice to use the saved version.
 - Real D1 persistence, full activity snapshots, duplicate-create protection, and stale-edit checks.
-- Optional prerequisite selection at capture/edit time, dependency validation in the database, and completion blocked until the prerequisite is done. A Gantt timeline displays date spans and dependencies; a week calendar displays all-day and timed tasks. The broader task/goal map comes later.
+- Optional prerequisite selection at capture/edit time, dependency validation in the database, and completion blocked until the prerequisite is done. A Day/Week/Month calendar displays all-day and timed tasks, with direct selection, drag/drop and resizing. Dependencies are edited in task details. The broader task/goal map comes later.
 - Optional end dates and one-day start/end times, with direct task creation/editing and drag/drop/resizing in the timeline. DHTMLX Community, FullCalendar Standard and TanStack Table power the scheduling and sortable task listing. See [timeline and Trash](docs/TIMELINE-AND-TRASH.md).
 - Desktop workspace with Tailwind CSS, a collapsible sidebar, sticky navigation, centered content, and keyboard search (Cmd/Ctrl K). The sidebar preference stays on the device and does not discard task drafts. Existing mobile styles remain in place below the 721px desktop breakpoint.
 - Responsive interface with labeled controls, keyboard focus states, and reduced-motion support. Browser visual and interaction review is still pending.
@@ -79,3 +79,5 @@ Use new numbered SQL migrations for schema changes after this baseline; do not e
 For automated checks and separate Pages/Worker deployments from `PlanWatch2.0`, see [GitHub Actions setup](docs/CI-CD.md). The workflow needs a repository configuration variable and a scoped Cloudflare token stored directly in GitHub Secrets.
 
 No automatic paid upgrades or paid AI fallback. Validate resource use against the user's existing $20 total monthly ceiling before enabling hosted features. A ChatGPT subscription does not include Cloudflare service charges.
+
+User documentation: [Guide utilisateur](docs/GUIDE-UTILISATEUR.md). The in-app question-mark button opens the same practical workflow.

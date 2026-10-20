@@ -54,7 +54,7 @@ onUnmounted(() => { clearTimeout(loadTimer); setAuthTokenProvider(async () => nu
 <template>
   <App v-if="isLoaded && isSignedIn && !signingOut" :key="`${userId}:${sessionId}`" :account-id="userId ?? undefined" :profile-name="profileName" @sign-out="signOut" @sign-in="signOut" />
   <main v-else class="auth-page">
-    <button class="theme-toggle auth-theme" type="button" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme"><component :is="isDark ? Sun : Moon" :size="20" /></button>
+    <button :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'" class="theme-toggle auth-theme" type="button" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme"><component :is="isDark ? Sun : Moon" :size="20" /></button>
     <section class="auth-card" aria-labelledby="signin-heading">
       <div class="auth-brand"><span class="brand-icon"><Check :size="22" :stroke-width="3" /></span><span>PlanWatch</span><span class="version">2.0</span></div>
       <p class="eyebrow">A LITTLE MORE ROOM TO FOCUS</p>

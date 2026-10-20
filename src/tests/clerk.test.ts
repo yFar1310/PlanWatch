@@ -390,12 +390,12 @@ describe('planning directly from the timeline',()=>{
       if(path==='/api/tasks'&&options.method==='POST'){created=true;return json({task:{id:'planned-task'}},201);}
       return json({items:[],nextCursor:null});
     });
-    wrapper=mount(ClerkGate);await flushPromises();await button('Timeline').trigger('click');await vi.advanceTimersByTimeAsync(0);await flushPromises();
+    wrapper=mount(ClerkGate);await flushPromises();await button('Calendar').trigger('click');await vi.advanceTimersByTimeAsync(0);await flushPromises();
     await button('Plan a task').trigger('click');await flushPromises();
     expect(wrapper.get('dialog').text()).toContain('Plan a task');
     await wrapper.get('dialog input[maxlength="200"]').setValue('Focus session');
     await wrapper.get('dialog form').trigger('submit');await flushPromises();
-    expect(created).toBe(true);expect(wrapper.find('dialog').exists()).toBe(false);expect(wrapper.get('#timeline-title').text()).toBe('Timeline');
+    expect(created).toBe(true);expect(wrapper.find('dialog').exists()).toBe(false);expect(wrapper.get('#timeline-title').text()).toBe('Calendar');expect(auth.signOut).not.toHaveBeenCalled();
     const sent=fetchMock.mock.calls.find(([path,options])=>path==='/api/tasks'&&options.method==='POST')!;
     expect(JSON.parse(sent[1].body)).toMatchObject({title:'Focus session',plannedDate:currentDay()});
   });
@@ -403,7 +403,7 @@ describe('planning directly from the timeline',()=>{
 
 
 describe('idea-first daily capture',()=>{
-  it('saves an idea without hidden dates or priorities and opens a confirmation-only planner',async()=>{
+  it('saves an idea independently, dismisses the optional next step and opens manual scheduling',async()=>{
     signedIn();let saved=false;const idea={id:'idea-one',title:'Call mum',status:'todo',version:1,plannedDate:null,estimateMinutes:null,notes:null};
     fetchMock.mockImplementation(async(path:string,options:RequestInit)=>{
       if(path==='/api/session')return json({workspaceId:'personal',displayName:'Administrator',canAdmin:true,mode:'clerk',email:null,expiresAt:sessionExpires});
@@ -414,7 +414,8 @@ describe('idea-first daily capture',()=>{
     capture.value.plannedDate='2099-10-21';capture.value.priority='urgent';
     wrapper=mount(ClerkGate);await flushPromises();expect(wrapper.find('.idea-lamp').exists()).toBe(true);expect(wrapper.find('form.capture').exists()).toBe(false);
     await wrapper.get('[aria-label="New idea"]').setValue('Call mum');await wrapper.get('.idea-capture').trigger('submit');await flushPromises();expect(ideaCapture.value.title).toBe('');expect(wrapper.text()).toContain('Idea saved without a date');
-    await button('Ideas').trigger('click');await vi.advanceTimersByTimeAsync(0);await flushPromises();expect(fetchMock.mock.calls.some(([path])=>path.includes('view=ideas'))).toBe(true);await wrapper.get('[aria-label="Find a time for Call mum"]').trigger('click');await flushPromises();expect(wrapper.get('dialog').text()).toContain('Find a time');expect(fetchMock.mock.calls.some(([path])=>path==='/api/planning/apply')).toBe(false);
+    expect(wrapper.find('dialog').exists()).toBe(false);expect(wrapper.get('.idea-saved').text()).toContain('IDEA SAVED');await button('Keep for later').trigger('click');expect(wrapper.find('.idea-saved').exists()).toBe(false);expect(fetchMock.mock.calls.some(([path])=>path.startsWith('/api/planning/')&&path!=='/api/planning/next')).toBe(false);
+    await button('Ideas').trigger('click');await vi.advanceTimersByTimeAsync(0);await flushPromises();expect(fetchMock.mock.calls.some(([path])=>path.includes('view=ideas'))).toBe(true);await wrapper.get('[aria-label="Plan Call mum"]').trigger('click');await flushPromises();expect(wrapper.get('dialog').text()).toContain('Task details');expect(fetchMock.mock.calls.some(([path])=>path==='/api/planning/apply')).toBe(false);
   });
   it('keeps an unconfirmed idea draft and reuses its key only on an explicit retry',async()=>{
     signedIn();let attempts=0;const keys:string[]=[];
@@ -424,6 +425,14 @@ describe('idea-first daily capture',()=>{
       if(path==='/api/tasks'&&options.method==='POST'){keys.push((options.headers as Record<string,string>)['Idempotency-Key']!);if(++attempts===1)throw new Error('Connection lost');return json({task:{id:'saved-idea',title:'A puzzle',version:1,plannedDate:null}},200);}return json({items:[],nextCursor:null});
     });
     wrapper=mount(ClerkGate);await flushPromises();await wrapper.get('[aria-label="New idea"]').setValue('A puzzle');await wrapper.get('.idea-capture').trigger('submit');await flushPromises();expect(ideaCapture.value.title).toBe('A puzzle');expect(attempts).toBe(1);await wrapper.get('.idea-capture').trigger('submit');await flushPromises();expect(keys[0]).toBe(keys[1]);expect(ideaCapture.value.title).toBe('');
+  });
+});
+
+describe('user guidance',()=>{
+  it('labels icon controls and opens the guide without changing the current idea draft',async()=>{
+    signedIn();wrapper=mount(ClerkGate);await flushPromises();await wrapper.get('[aria-label="New idea"]').setValue('A thought to keep');
+    for(const button of wrapper.findAll('button.icon-button')){expect(button.attributes('aria-label')).toBeTruthy();expect(button.attributes('title')).toBe(button.attributes('aria-label'));}
+    await wrapper.get('[aria-label="User guide"]').trigger('click');expect(wrapper.get('dialog').text()).toContain('Guide de PlanWatch');await wrapper.get('dialog').trigger('cancel');expect(wrapper.find('dialog').exists()).toBe(false);expect(ideaCapture.value.title).toBe('A thought to keep');
   });
 });
 

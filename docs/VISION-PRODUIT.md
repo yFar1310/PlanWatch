@@ -43,7 +43,7 @@ Exemple illustratif, avec des horaires fournis par l’utilisateur : travail jus
 
 ### Agir et adapter
 
-L’accueil met en avant la prochaine activité et le programme du jour. Le calendrier et le Gantt restent disponibles pour une vision plus détaillée. À terme, « Ma journée a changé » proposera un ajustement en cas de retard ou de changement d’énergie, avec aperçu et validation.
+L’accueil met en avant la prochaine activité et le programme du jour. Le calendrier en vues Jour, Semaine et Mois reste disponible pour une vision plus détaillée. À terme, « Ma journée a changé » proposera un ajustement en cas de retard ou de changement d’énergie, avec aperçu et validation.
 
 ### Se rappeler
 
@@ -54,7 +54,7 @@ Les rappels seront configurables et pourront inclure une préparation ou un dép
 - **Accueil / Today** : lampe, capture rapide, dernière idée sauvegardée, prochaine activité et activités du jour.
 - **Idées / Ideas** : activités ouvertes sans date, recherche, tri, édition, suppression et action « Trouver un créneau ».
 - **Tâches / All tasks** : vue complète et contrôles avancés existants.
-- **Timeline** : Gantt quotidien/hebdomadaire, calendrier et ajustement des horaires.
+- **Calendar** : calendrier quotidien/hebdomadaire/mensuel et ajustement des horaires.
 - **Corbeille** et **Administration** : fonctions existantes conservées.
 
 L’interface conserve pour le premier lot les libellés anglais de l’application. Les formulations françaises de ce document expriment le produit ; une traduction complète fera l’objet d’un lot cohérent.

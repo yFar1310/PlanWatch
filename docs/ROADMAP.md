@@ -64,3 +64,6 @@ Implemented: optional date ranges and time slots, Gantt Daily/Weekly spans with 
 ## Product direction — ideas into realistic actions
 
 The current product specification and implementation sequence are documented in [VISION-PRODUIT.md](VISION-PRODUIT.md). The first slice adds idea capture, a private unscheduled inbox and explicitly confirmed scheduling suggestions based on rules. AI interpretation, recurring preferences, reminders and weekly advice are later slices.
+
+
+Update 21 October 2026: Calendar now replaces the Gantt interface with Day/Week/Month views using FullCalendar Standard only. The earlier DHTMLX implementation has been removed. See [current scheduling behavior](SCHEDULING-LIBRARIES.md) and the [user guide](GUIDE-UTILISATEUR.md).

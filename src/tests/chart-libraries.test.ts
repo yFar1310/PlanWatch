@@ -1,51 +1,34 @@
 import {afterEach,describe,it,expect,vi} from 'vitest';
 import {mount,flushPromises,type VueWrapper} from '@vue/test-utils';
-import GanttChart from '../GanttChart.vue';
 import CalendarChart from '../CalendarChart.vue';
 import FullCalendar from '@fullcalendar/vue3';
-import {Gantt} from 'dhtmlx-gantt/codebase/dhtmlxgantt.es.js';
-import {floatingDate} from '../schedule-adapters';
 import type {Task} from '../../shared/tasks';
 let wrapper:VueWrapper|undefined;
 const task:Task={id:'task-a',title:'Focus <img src=x onerror=alert(1)>',notes:null,status:'todo',priority:'high',dependsOn:null,dependencyTitle:null,dependencyStatus:null,plannedDate:'2026-10-20',plannedEndDate:null,startTime:'09:00',endTime:'10:00',estimateMinutes:null,actualMinutes:null,createdAt:1,updatedAt:1,completedAt:null,deletedAt:null,version:1};
 afterEach(()=>{wrapper?.unmount();wrapper=undefined;vi.restoreAllMocks();});
-describe('installed chart libraries',()=>{
-  it('mounts the real DHTMLX engine and safely renders task titles',async()=>{
-    const factory=vi.spyOn(Gantt,'getGanttInstance');
-    wrapper=mount(GanttChart,{attachTo:document.body,props:{items:[task],from:'2026-10-20',to:'2026-10-20',scale:'day',disabled:false}});await flushPromises();
-    expect(wrapper.find('.gantt_container').exists()).toBe(true);expect(wrapper.find('img').exists()).toBe(false);expect(wrapper.emitted('failure')).toBeUndefined();
-    const chart=factory.mock.results[0]!.value;
-    expect(chart.getTask(task.id).text).toBe(task.title);
-    expect(chart.templates.task_text(new Date(),new Date(),chart.getTask(task.id))).toContain('&lt;img');
-    expect(wrapper.find('.gantt_task_scale').exists()).toBe(true);
+async function open(){wrapper=mount(CalendarChart,{attachTo:document.body,props:{items:[task],from:'2026-10-20',view:'day',disabled:false}});await flushPromises();return wrapper;}
+describe('installed FullCalendar integration',()=>{
+  it('mounts a Paris-aware day calendar with safe titles and keyboard editing',async()=>{
+    const w=await open(),fc=w.getComponent(FullCalendar),calendar=fc.vm.getApi(),event=calendar.getEventById(task.id)!;
+    expect(calendar.view.type).toBe('timeGridDay');expect(event.startStr).toBe('2026-10-20T09:00:00+02:00');expect(event.endStr).toBe('2026-10-20T10:00:00+02:00');expect(w.find('img').exists()).toBe(false);
+    const element=w.find('[aria-label="Edit Focus <img src=x onerror=alert(1)>"]');expect(element.exists()).toBe(true);expect(element.attributes('title')).toContain('Click to edit');await element.trigger('keydown',{key:'Enter'});expect(w.emitted('edit')?.[0]?.[0]).toMatchObject({id:task.id});
   });
-  it('bridges real Gantt drag and resize hooks with the original version and a working revert',async()=>{
-    const factory=vi.spyOn(Gantt,'getGanttInstance');wrapper=mount(GanttChart,{attachTo:document.body,props:{items:[task],from:'2026-10-20',to:'2026-10-20',scale:'day',disabled:false}});await flushPromises();
-    const chart=factory.mock.results[0]!.value;
-    expect(chart.callEvent('onBeforeTaskDrag',[task.id,'resize',new Event('mousedown')])).toBe(true);
-    chart.getTask(task.id).end_date=floatingDate('2026-10-20','10:15');chart.callEvent('onAfterTaskDrag',[task.id,'resize',new Event('mouseup')]);
-    const change=wrapper.emitted('change')![0]![0] as {version:number;schedule:unknown;revert:()=>void};expect(change.version).toBe(1);expect(change.schedule).toMatchObject({startTime:'09:00',endTime:'10:15'});
-    change.revert();expect(chart.getTask(task.id).end_date.getHours()).toBe(10);expect(chart.getTask(task.id).end_date.getMinutes()).toBe(0);
-    await wrapper.setProps({disabled:true});expect(chart.callEvent('onBeforeTaskDrag',[task.id,'move',new Event('mousedown')])).toBe(false);
+  it('switches Day, Week and Month in the real library without a premium layout plugin',async()=>{
+    const w=await open(),calendar=w.getComponent(FullCalendar).vm.getApi();await w.setProps({view:'week'});expect(calendar.view.type).toBe('timeGridWeek');
+    await w.setProps({view:'month'});expect(calendar.view.type).toBe('dayGridMonth');expect(w.find('.fc-daygrid').exists()).toBe(true);expect(calendar.view.activeStart.toISOString()).toBe('2026-09-27T22:00:00.000Z');expect(calendar.view.activeEnd.toISOString()).toBe('2026-11-08T23:00:00.000Z');
   });
-  it('mounts FullCalendar with Paris-aware timed events and keyboard editing',async()=>{
-    wrapper=mount(CalendarChart,{attachTo:document.body,props:{items:[task],from:'2026-10-19',disabled:false}});await flushPromises();
-    const fc=wrapper.getComponent(FullCalendar),calendar=fc.vm.getApi(),event=calendar.getEventById(task.id)!;
-    expect(event.startStr).toBe('2026-10-20T09:00:00+02:00');expect(event.endStr).toBe('2026-10-20T10:00:00+02:00');expect(wrapper.find('img').exists()).toBe(false);
-    const eventElement=wrapper.find('[aria-label="Edit Focus <img src=x onerror=alert(1)>"]');expect(eventElement.exists()).toBe(true);await eventElement.trigger('keydown',{key:'Enter'});expect(wrapper.emitted('edit')?.[0]?.[0]).toMatchObject({id:task.id});
-  });
-  it('keeps an all-day Gantt move at midnight when its source day crosses a DST change',async()=>{
-    const factory=vi.spyOn(Gantt,'getGanttInstance'),allDay={...task,plannedDate:'2026-10-25',startTime:null,endTime:null};
-    wrapper=mount(GanttChart,{attachTo:document.body,props:{items:[allDay],from:'2026-10-19',to:'2026-10-25',scale:'week',disabled:false}});await flushPromises();const chart=factory.mock.results[0]!.value;
-    chart.callEvent('onBeforeTaskDrag',[task.id,'move',new Event('mousedown')]);const moved=chart.getTask(task.id);moved.start_date=floatingDate('2026-10-26');moved.end_date=floatingDate('2026-10-27','01:00');
-    expect(chart.callEvent('onBeforeTaskChanged',[task.id,'move',{},new Event('mouseup')])).toBe(true);chart.callEvent('onAfterTaskDrag',[task.id,'move',new Event('mouseup')]);
-    expect(wrapper.emitted('change')?.[0]?.[0]).toMatchObject({schedule:{plannedDate:'2026-10-26',plannedEndDate:'2026-10-26',startTime:null,endTime:null}});expect(moved.end_date.getHours()).toBe(0);
-  });
-  it('bridges FullCalendar resize callbacks, preserves the version and reverts invalid overnight changes',async()=>{
-    wrapper=mount(CalendarChart,{attachTo:document.body,props:{items:[task],from:'2026-10-19',disabled:false}});await flushPromises();const fc=wrapper.getComponent(FullCalendar),event=fc.vm.getApi().getEventById(task.id)!;
-    const options=fc.props('options')!,resize=options.eventResize as (info:unknown)=>void,revert=vi.fn();
+  it('bridges resize and move callbacks, preserving the original version and rejecting overnight times',async()=>{
+    const w=await open(),fc=w.getComponent(FullCalendar),event=fc.vm.getApi().getEventById(task.id)!;
+    const options=fc.props('options')!,resize=options.eventResize as (info:unknown)=>void,drop=options.eventDrop as (info:unknown)=>void,revert=vi.fn();
     resize({event:{id:task.id,start:new Date('2026-10-20T08:00:00Z'),end:new Date('2026-10-20T09:15:00Z'),allDay:false},oldEvent:event,revert});
-    expect(wrapper.emitted('change')?.[0]?.[0]).toMatchObject({version:1,schedule:{startTime:'10:00',endTime:'11:15'}});
-    resize({event:{id:task.id,start:new Date('2026-10-20T21:00:00Z'),end:new Date('2026-10-21T00:00:00Z'),allDay:false},oldEvent:event,revert});expect(revert).toHaveBeenCalledOnce();expect(wrapper.emitted('failure')).toHaveLength(1);
+    expect(w.emitted('change')?.[0]?.[0]).toMatchObject({version:1,schedule:{startTime:'10:00',endTime:'11:15'}});
+    drop({event:{id:task.id,start:new Date('2026-10-20T21:00:00Z'),end:new Date('2026-10-21T00:00:00Z'),allDay:false},oldEvent:event,revert});expect(revert).toHaveBeenCalledOnce();expect(w.emitted('failure')).toHaveLength(1);
+    await w.setProps({disabled:true});resize({event,oldEvent:event,revert});expect(revert).toHaveBeenCalledTimes(2);expect(w.emitted('change')).toHaveLength(1);
+  });
+  it('passes the selected interval to capture without saving and converts all-day exclusive ends',async()=>{
+    const w=await open(),fc=w.getComponent(FullCalendar),select=fc.props('options')!.select as (info:unknown)=>void;
+    select({start:new Date('2026-10-20T07:15:00Z'),end:new Date('2026-10-20T08:45:00Z'),allDay:false});expect(w.emitted('plan')?.[0]).toEqual(['2026-10-20','09:15','10:45',undefined]);
+    select({start:new Date('2026-10-24T22:00:00Z'),end:new Date('2026-10-26T23:00:00Z'),allDay:true});expect(w.emitted('plan')?.[1]).toEqual(['2026-10-25',undefined,undefined,'2026-10-26']);
+    await w.setProps({disabled:true});select({start:new Date(),end:new Date(),allDay:true});expect(w.emitted('plan')).toHaveLength(2);
   });
 });
