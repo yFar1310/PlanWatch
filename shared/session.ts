@@ -1,5 +1,5 @@
 export interface SessionInfo {
-  mode: 'local' | 'access';
+  mode: 'local' | 'clerk';
   email: string | null;
   expiresAt: number | null;
 }

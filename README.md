@@ -25,7 +25,7 @@ The original app and database volumes remain available in the original checkout.
 
 Cloudflare-first: Vue, TypeScript, Hono, Workers, and a D1 feasibility prototype. R2, Workers AI, scheduled Workflows, email, and Durable Objects are added only as their features are implemented. The database choice must pass the reliability and budget checks before any data migration; managed PostgreSQL remains the fallback if required.
 
-The target development workflow uses Wrangler/Vite. Docker is not a requirement for the new implementation. No cloud resources, paid plans, AI requests, or email deliveries have been enabled by creating this branch.
+The development workflow uses Wrangler/Vite. Hosted previews use Cloudflare Pages for Vue, a separate Hono Worker and D1, and Clerk Hobby for authentication. Docker is not required. Dedicated preview resources are provisioned; paid plans, AI requests, and report email delivery are not enabled.
 
 ## Run locally
 
@@ -55,9 +55,9 @@ Tasks persist under `.wrangler/state/` in this checkout; do not delete that dire
 - Responsive interface with labeled controls, keyboard focus states, and reduced-motion support. Browser visual and interaction review is still pending.
 - Install manifest, home-screen icons, safe-area layouts, installation guidance, and an offline screen. Private task/session responses are never cached by the service worker.
 - Connection/session feedback, disabled saves while offline or signed out, and an explicit action for app updates.
-- A Cloudflare Access authentication path with signed-token verification and a single allowed owner. Hosted setup stays closed until configured.
+- Clerk sign-in, token renewal, and sign-out with backend signature verification and a pinned owner. Unconfigured hosted access stays closed.
 
-Local API access requires both a loopback hostname and the local development flag. Hosted API access requires a verified Cloudflare Access token for the configured team, application, and owner email. The committed development configuration disables public access. See [phone access and hosting](docs/PHONE-ACCESS.md) for configuration, recovery, and remaining real-device checks. Goals/map, AI coaching, and scheduled reports follow [the roadmap](docs/ROADMAP.md).
+Local API access requires both a loopback hostname and the local development flag. Hosted access requires a verified Clerk session for the configured instance, frontend origin, and owner user ID. Pages calls the separate Worker with bearer tokens and restricted CORS. The supplied Clerk development instance supports preview testing; an owned domain and production setup are still needed for release. The committed development configuration disables public access. See [phone access and hosting](docs/PHONE-ACCESS.md) for configuration, recovery, and remaining real-device checks. Goals/map, AI coaching, and scheduled reports follow [the roadmap](docs/ROADMAP.md).
 
 ## Verify
 
@@ -65,10 +65,12 @@ Local API access requires both a loopback hostname and the local development fla
 npm run check
 ```
 
-Runs strict TypeScript checks, 40 integration tests in the Workers runtime, 13 API-client/service-worker/asset checks, and the production build. Tests use isolated databases and do not change the persistent development database. The PDF probe tests runtime compatibility, not a finished report template or free-tier CPU suitability. See [foundation findings](docs/FOUNDATION.md) and [daily-planning notes](docs/DAILY-PLANNING.md).
+Runs strict TypeScript checks, 45 integration tests in the Workers runtime, 12 Vue component tests, 21 API-client/service-worker/asset/deployment checks, and the production build. Tests use isolated databases and do not change the persistent development database. The PDF probe tests runtime compatibility, not a finished report template or free-tier CPU suitability. See [foundation findings](docs/FOUNDATION.md) and [daily-planning notes](docs/DAILY-PLANNING.md).
 
 Use new numbered SQL migrations for schema changes after this baseline; do not edit an already-applied migration.
 
 ## Budget
+
+For automated checks and separate Pages/Worker deployments from `PlanWatch2.0`, see [GitHub Actions setup](docs/CI-CD.md). The workflow needs a repository configuration variable and a scoped Cloudflare token stored directly in GitHub Secrets.
 
 No automatic paid upgrades or paid AI fallback. Validate resource use against the user's existing $20 total monthly ceiling before enabling hosted features. A ChatGPT subscription does not include Cloudflare service charges.

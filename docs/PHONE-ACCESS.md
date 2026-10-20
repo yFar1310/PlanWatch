@@ -1,63 +1,82 @@
 # Phone access and private hosting
 
-Implemented and checked on 19 October 2026. This milestone adds the installable-app files, connection/session handling, a private authentication path, and verified local backup tooling. Actual phone installation and hosted sign-in remain separate acceptance checks.
+Updated 20 October 2026. PlanWatch uses a Vue frontend on Cloudflare Pages, a separate Hono API Worker with D1, and Clerk Hobby for sign-in. Cloudflare Access was replaced at the owner's request. This authentication path does not require Zero Trust enrollment or a payment card.
 
-## Authentication
+## Authentication and ownership
 
-Local development retains the loopback-only bypass with `LOCAL_DEV=true`. Public hostnames cannot use it. Hosted APIs require all of:
+The official Vue SDK displays sign-in and obtains a current session token for each API call. Requests use explicit Bearer headers; the client does not persist tokens itself, send cross-origin cookies, follow login redirects, or replay writes automatically. Account/session changes invalidate pending responses and unmount private content. Device-local drafts survive sign-out. Short-lived tokens are renewed without interrupting editing.
 
-- `ACCESS_TEAM_DOMAIN`: the team hostname, such as `your-team.cloudflareaccess.com`, without `https://`.
-- `ACCESS_AUD`: the Access application's audience tag.
-- `OWNER_EMAIL`: the one email address allowed to use the personal workspace.
-- A valid `Cf-Access-Jwt-Assertion` verified with the team's public keys, RS256, the expected issuer/audience, required subject/email/issued/expiry claims, and the allowed email. Hosted writes also require the matching Origin.
+The Worker verifies signatures using jose and the instance's public JWKS, cached per isolate with a bounded retrieval timeout. No Clerk secret key, per-request user lookup, session database table, paid feature, or custom email claim is needed.
 
-Identity headers and arbitrary cookies are not treated as verified sessions. The API returns a sign-in error for missing/invalid/expired tokens and a generic temporary error if key verification is unavailable. It never logs tokens. `GET /api/session` returns the verified mode and expiry; API responses are private/no-store.
+Hosted settings in ignored `wrangler.preview.jsonc`:
 
-The hosted owner ID is the stable single-person workspace `personal`. Local records remain under `local-preview`; neither v1 data nor local prototype data is automatically copied to the hosted workspace.
+- `LOCAL_DEV=false`.
+- `CLERK_ISSUER_URL`: the exact HTTPS Clerk Frontend API origin.
+- `CLERK_OWNER_USER_ID`: the explicitly selected user ID; no first-user-wins enrollment.
+- `APP_ORIGIN`: the exact permitted Pages frontend origin.
+- `API_ORIGIN`: the exact Worker origin; defaults to APP_ORIGIN for a same-origin deployment.
 
-The application verifies Access tokens itself because Cloudflare's current Static Assets router does not forward `ctx.access` into the user Worker. References: [Access identity and router limitations](https://developers.cloudflare.com/workers/configuration/cloudflare-access/#ctxaccess-limitations), [token validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/).
+Verification requires RS256, the expected issuer, version 2 claims, valid user/session IDs, issued/not-before/expiry timestamps, and azp equal to APP_ORIGIN. Pending and impersonated sessions are rejected. The owner is checked before D1 access. Cookies, old Access assertions, identity headers, API keys, and query-string tokens are not accepted. Tokens/provider errors are never logged.
 
-## Hosted preview setup
+The hosted database owner remains `personal`; changing login providers does not rename it. Loopback development with LOCAL_DEV=true retains a separate `local-preview` owner. That flag cannot bypass authentication on public hostnames. No v1 or prototype records are imported automatically.
 
-The intended preview uses Worker `planwatch-v2-preview` and its own D1 database. The local development binding stays separate. Copy `wrangler.preview.example.jsonc` to the ignored `wrangler.preview.jsonc`, then fill in the account ID, dedicated preview D1 ID, and Access settings. Account-specific email/configuration is not committed.
+Signature verification does not remotely revoke an issued JWT before expiry. The UI clears immediately on sign-out; server validity remains bounded by token lifetime. Real-device renewal/revocation checks remain open. References: [Vue SDK](https://clerk.com/docs/vue/getting-started/quickstart), [session claims](https://clerk.com/docs/guides/sessions/session-tokens), [verification](https://clerk.com/docs/guides/sessions/manual-jwt-verification).
 
-Build and apply the new database's migrations before deployment:
+## Clerk setup and budget
+
+Use **Hobby**, without adding a payment card or paid add-ons. Configure Google sign-in. After creating the owner, use Invite-only registration if available on the selected plan. The API's owner check is independent. Clerk's paid production email Allowlist is not used. See [pricing](https://clerk.com/pricing) and [access restrictions](https://clerk.com/docs/guides/secure/restricting-access).
+
+The supplied pk_test key belongs to a development instance. It supports preview testing, not production acceptance. Clerk production currently requires an owned domain, DNS configuration, and dedicated Google OAuth credentials. The owner does not yet have a PlanWatch domain; no domain purchase or paid upgrade is enabled. See [production prerequisites](https://clerk.com/docs/guides/development/deployment/production).
+
+## Separate Pages frontend and API Worker
+
+Dedicated preview targets:
+
+- Frontend: https://planwatch-v2-preview.pages.dev
+- API: https://planwatch-v2-preview.yahyafarehanmj.workers.dev/api
+- Worker and D1 names: planwatch-v2-preview.
+- Pages production branch: PlanWatch2.0, in this separate preview project.
+
+The existing Pages project planwatch and v1 data are preserved. Both migrations are applied to the dedicated D1 database; the earlier remote check found zero tasks, zero events, and five required triggers. Authentication needs no schema migration.
+
+Copy `.env.example` to an ignored environment file and set `VITE_CLERK_PUBLISHABLE_KEY`. Vue/Vite uses this prefix, not NEXT_PUBLIC_. Set `VITE_API_BASE_URL=https://YOUR_WORKER_HOSTNAME/api` in ignored `.env.production.local` for Pages builds; local development keeps /api. These are public build settings. Never put secrets in VITE_ variables.
+
+The Worker allows CORS only for APP_ORIGIN, requires that Origin on hosted writes, and permits only necessary preflight methods/headers. Preflight never reads D1. Authentication errors retain CORS headers for the allowed frontend. CORS is additional browser protection; signatures and ownership protect every task/session request. API responses are private/no-store.
 
 ```sh
 npm run check
-npx wrangler d1 migrations apply DB --remote --config wrangler.preview.jsonc
-npx wrangler deploy --config wrangler.preview.jsonc
+npx wrangler deploy --dry-run --config wrangler.preview.jsonc --name planwatch-v2-preview
+npx wrangler deploy --config wrangler.preview.jsonc --name planwatch-v2-preview
+npm run deploy:pages
 ```
 
-The configuration disables version preview URLs. Never replace an existing unrelated Worker/database or apply development SQL to a personal database. The preview starts with an empty workspace; personal-data migration needs its own reviewed import and recovery check.
+`wrangler.preview.example.jsonc` is the API-only template. The root `wrangler.jsonc` remains for local unified development. `pages/wrangler.jsonc` configures static assets. The Pages helper anchors its generated configuration lookup so Vite's local Worker redirect cannot substitute the local D1 binding. Only dist/client is uploaded, never dist/worker or .dev.vars.
 
-Wrangler login was verified. Its OAuth permissions permit Workers/D1 operations, but this account's Access-organization/application API requests returned HTTP 403. The Access setup therefore needs the dashboard or separately authorized Access permissions; a Google password or global API key is not needed.
+Pages uses Direct Upload. The [GitHub Actions workflow](CI-CD.md) publishes after successful checks when its repository variable and Cloudflare token are configured. Current Wrangler delegates creation of new Pages projects to Workers by default; this project was explicitly created directly on Pages to honor the requested separation. See [Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/).
 
-For dashboard setup, open **Workers & Pages → planwatch-v2-preview → Access → Protect this Worker behind Access**, choose **All traffic**, and restrict the policy to the intended owner. If prompted to initialize Zero Trust, select the Free option; do not upgrade billing. Review the Access application's audience tag and team domain, then put them in the ignored preview config with the allowed email. See [Cloudflare's setup instructions](https://developers.cloudflare.com/workers/configuration/cloudflare-access/).
+Cloudflare acknowledged both deployments on 20 October 2026: API Worker version `c62b43d4-6b54-453d-8dbf-7587394479e2` and Pages deployment `d262b26c` (11 uploaded static files). The supplied owner ID is pinned in the ignored API configuration.
 
-For platform installers that fetch icons/metadata without a login cookie, the manifest, `/icons/*`, `/sw.js`, and `/offline` contain only public assets. If the device installer cannot retrieve these behind Access, configure narrowly scoped public asset paths while keeping the app and every `/api/*` route protected. The API always verifies its token even if an alternate URL is reachable.
+Public HTTP responses and deployment results must be checked separately. Probes to both Pages and Worker hosts fail with TLS connection resets from this environment, including public assets and other pre-existing Pages projects. The owner confirmed the preview opens over cellular data and that the reset occurs on the school Wi-Fi. The owner also reached the task capture interface; an actual task creation/refresh round trip has not yet been confirmed. The local API responds successfully and the Clerk public JWKS endpoint returned HTTP 200.
 
-## Installation, offline behavior, and updates
+## Installation and offline behavior
 
-`manifest.webmanifest` provides a stable app identity, standalone display, and real 192/512px icons, with a 180px Apple icon. The Install control uses the browser prompt when available and shows platform instructions otherwise. On iPhone/iPad, open Safari's Share menu and choose Add to Home Screen. Installation requires HTTPS or a supported loopback development origin. See [MDN install requirements](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable).
+The manifest supplies a stable standalone identity, 192/512px icons, and a 180px Apple icon. The Install control uses the browser prompt or explains its installation menu. On iPhone/iPad, use Safari Share → Add to Home Screen. See [install requirements](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable).
 
-The service worker registers only in production builds. It caches the public offline screen/icons, rejects login redirects or unexpected HTML during preparation, and never caches task/session/API responses or the authenticated app document. The offline URL is `/offline` because Cloudflare canonicalizes `/offline.html` with a redirect. Private records are loaded from the server when connected; reopening the app offline shows a reconnect screen, not a stale task database.
+The production service worker caches only /offline and public icons, rejecting redirects/unexpected HTML. It never caches task/session/API data, Clerk requests, or app HTML. Cross-origin API requests bypass it. Reopening offline shows a reconnect screen. An open app retains drafts; saves need connectivity and verified sign-in. Updates require explicit reload. Full offline synchronization is not implemented.
 
-An already-open app can retain local drafts while offline. Save actions wait for connectivity and an authenticated session. The app rechecks the session when restored from the browser's back/forward cache, hides private records when the session expires, and preserves drafts. App updates require an explicit reload action rather than interrupting editing. No background/offline write queue is implemented.
+Drafts remain on the device after sign-out and are not encrypted. Use a trusted personal device. Real phone installation, redirects, and session behavior need separate checks.
 
-## Local backup and verified restore
+## Backup and recovery
 
 ```sh
 npm run db:backup:local
 npm run db:verify-backup -- /absolute/path/to/.wrangler/backups/planwatch-....sql
 ```
 
-Backup SQL and its SHA-256/size manifest are private, ignored local files. Verification validates the checksum, restores into a new isolated configuration/database, compares an exact re-export, runs D1's supported `quick_check` and `foreign_key_check`, checks required triggers, and exercises creation/history, dependency-cycle rejection, and deletion/unlinking. It does not restore over the working database. Each verification copy remains under `.wrangler/restore-checks/` for inspection.
+Backups and checksum/size manifests are private ignored files. Verification restores into an isolated copy, compares an exact re-export, runs D1 quick_check/foreign_key_check, checks triggers, and tests history, cycles, and deletion/unlinking. An actual local restore passed without overwriting the working database. Hosted recovery and rollback still need a drill before personal-data import. See [D1 recovery](https://developers.cloudflare.com/d1/reference/time-travel/) and [export/import](https://developers.cloudflare.com/d1/best-practices/import-export-data/).
 
-An actual backup/restore passed locally, preserving the source export and checking task/history behavior in the restored copy. Hosted D1 recovery still needs an end-to-end drill before personal data is imported. D1 Time Travel retention depends on the account plan; consult [Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/) before making a hosted recovery plan. [D1 export/import](https://developers.cloudflare.com/d1/best-practices/import-export-data/) and [supported checks](https://developers.cloudflare.com/d1/sql-api/sql-statements/) describe the underlying commands.
+## Verification and acceptance
 
-## Verification and remaining acceptance checks
+Type checks, both builds, **45 Workers integration tests, 12 Vue component tests, and 21 client/service-worker/asset/deployment tests pass**. Coverage includes RSA signatures, invalid/expired/future/wrong-issuer/wrong-origin tokens, other users, pending/impersonated sessions, Origin/CORS/preflight checks, owner isolation, key outages, renewal, delayed responses, sign-out failures, draft retention, cache isolation, and icons.
 
-Type checks, both builds, 40 Workers integration tests, and 13 client/service-worker/asset tests pass. Coverage includes real RSA token signatures, forged/missing/expired/wrong-issuer/wrong-audience tokens, wrong owners, hosted Origin checks, separate local/hosted ownership, key-service failure, login redirects, unconfirmed writes, cache isolation, update activation, and PNG dimensions. Local production-preview HTTP checks cover the session/health endpoints and installation assets/headers.
-
-The browser connection provided to this session still fails during setup. These automated and HTTP checks do not establish real phone installation, interactive sign-in, session renewal/logout, accessibility, keyboard behavior, service-worker lifecycle in a browser, or hosted CPU/cost suitability. Complete those checks and a hosted backup/restore plus deployment rollback before treating phone access as released. No AI, R2, email delivery, scheduling, or paid plan upgrade is enabled here.
+Component tests use jsdom with mocked Clerk state; they do not verify actual Google OAuth or browser rendering. The browser tool remains unavailable during setup. Real-device sign-in/renewal/logout, installation, accessibility/visual review, hosted CPU/cost measurements, recovery, and rollback remain open. AI, R2, reports, email sending, and paid upgrades are not activated.

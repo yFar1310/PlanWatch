@@ -10,6 +10,8 @@ import { useTheme } from './theme';
 import TaskEditor from './TaskEditor.vue';
 import { usePwa } from './pwa';
 
+defineProps<{ accountId?: string }>();
+const emit = defineEmits<{ signOut: []; signIn: [] }>();
 type View = 'today' | 'tasks' | 'trash';
 const view = ref<View>('today');
 const status = ref<'open' | 'done' | 'all'>('open');
@@ -25,6 +27,7 @@ const lastDeleted = ref<Task | null>(null);
 const online = ref(navigator.onLine);
 const session = ref<SessionInfo | null>(null);
 const authState = ref<'loading' | 'ready' | 'signin' | 'unavailable'>('loading');
+const setupRequired = ref(false);
 const lastSynced = ref<number | null>(null);
 const canWrite = computed(() => online.value && authState.value === 'ready');
 const { canInstall, help: installHelp, install, update: appUpdate, applyUpdate, registrationError } = usePwa();
@@ -38,8 +41,10 @@ let sequence = 0;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 let clockTimer: ReturnType<typeof setInterval> | undefined;
 let disposed = false;
+let checkingSession = false;
 
 async function load(append = false) {
+  if (disposed || authState.value !== 'ready') return;
   const request = ++sequence;
   loading.value = true;
   if (!online.value) { loading.value = false; throw new Error('Reconnect to refresh your tasks.'); }
@@ -48,7 +53,7 @@ async function load(append = false) {
   if (append && cursor.value) query.set('cursor', cursor.value);
   try {
     const page = await api<TaskPage>(`/tasks?${query}`);
-    if (request !== sequence || disposed) return;
+    if (request !== sequence || disposed || authState.value !== 'ready') return;
     tasks.value = append ? [...tasks.value, ...page.items.filter(task => !tasks.value.some(old => old.id === task.id))] : page.items;
     cursor.value = page.nextCursor;
     lastSynced.value = Date.now();
@@ -56,9 +61,11 @@ async function load(append = false) {
     if (request === sequence && !disposed) throw problem;
   } finally { if (request === sequence && !disposed) loading.value = false; }
 }
-function clearPrivateView() { tasks.value = []; cursor.value = null; editing.value = null; lastDeleted.value = null; lastSynced.value = null; }
+function clearPrivateView() { ++sequence; loading.value = false; tasks.value = []; cursor.value = null; editing.value = null; lastDeleted.value = null; lastSynced.value = null; }
 function showError(problem: unknown) {
+  if (disposed) return;
   error.value = problem instanceof Error ? problem.message : 'Something went wrong. Please try again.';
+  setupRequired.value = problem instanceof ApiError && problem.code === 'setup_required';
   if (problem instanceof ApiError && [401, 403].includes(problem.status)) {
     authState.value = 'signin';
     session.value = null;
@@ -66,16 +73,22 @@ function showError(problem: unknown) {
   }
 }
 async function checkSession() {
-  if (!online.value) return false;
+  if (!online.value || checkingSession || disposed) return false;
+  checkingSession = true;
   try {
-    session.value = await api<SessionInfo>('/session');
+    const verified = await api<SessionInfo>('/session');
+    if (disposed) return false;
+    session.value = verified;
+    setupRequired.value = false;
     authState.value = 'ready';
     return true;
   } catch (problem) {
+    if (disposed) return false;
     authState.value = 'unavailable';
+    clearPrivateView();
     showError(problem);
     return false;
-  }
+  } finally { checkingSession = false; }
 }
 async function reload() {
   clearTimeout(reloadTimer);
@@ -94,8 +107,8 @@ watch([view, status, search, today], (values, old) => {
   const delay = values[2] !== old[2] ? 300 : 0;
   reloadTimer = setTimeout(() => { void reload(); }, delay);
 });
-async function run(action: () => Promise<void>) {
-  if (busy.value || loading.value) return;
+async function run(action: () => Promise<void>, allowWhileLoading = false) {
+  if (busy.value || (loading.value && !allowWhileLoading)) return;
   if (!canWrite.value) { error.value = online.value ? 'Sign in before saving your changes.' : 'Reconnect to save. Your changes remain as drafts.'; return; }
   busy.value = true;
   error.value = '';
@@ -128,7 +141,7 @@ async function add() {
     capture.value = { title: '', plannedDate: capture.value.plannedDate, key: null, payload: null };
     notice.value = plannedDate ? `Added for ${formatDay(plannedDate)}. Find all your tasks in Tasks.` : 'Added without a date. Find it in Tasks.';
     await load();
-  });
+  }, true);
   await nextTick();
   if (!error.value) titleInput.value?.focus();
 }
@@ -173,10 +186,14 @@ function restore(task: Task) {
   }).then(() => { if (!error.value) return focusList(); });
 }
 function tick() {
-  if (session.value?.expiresAt && session.value.expiresAt <= Date.now()) {
-    authState.value = 'signin';
-    session.value = null;
-    clearPrivateView();
+  // Clerk session tokens are short-lived: obtain a renewed token, not a forced logout every minute.
+  if (session.value?.expiresAt && session.value.expiresAt <= Date.now() + 30_000) {
+    if (online.value) void checkSession();
+    else if (session.value.expiresAt <= Date.now()) {
+      authState.value = 'signin';
+      session.value = null;
+      clearPrivateView();
+    }
   }
   const day = currentDay();
   if (day !== today.value) {
@@ -221,16 +238,16 @@ onUnmounted(() => {
         <button v-for="item in ([{ id: 'today', title: 'Today', icon: CalendarDays }, { id: 'tasks', title: 'Tasks', icon: ListTodo }, { id: 'trash', title: 'Trash', icon: Trash2 }] as const)" :key="item.id" :class="{ active: view === item.id }" :aria-current="view === item.id ? 'page' : undefined" :disabled="busy" @click="chooseView(item.id)"><component :is="item.icon" :size="19" />{{ item.title }}</button>
       </nav>
       <div class="sidebar-note"><span class="small-dot"></span> One step at a time<p>A little less to remember.<br>A little more room to focus.</p></div>
-      <div class="preview-label">{{ session?.mode === 'access' ? 'Private workspace' : 'Local preview' }}<span>Plan a little. Focus a little.</span></div>
+      <div class="preview-label">{{ accountId ? 'Private workspace' : 'Local preview' }}<span>Plan a little. Focus a little.</span></div>
     </aside>
 
     <main>
       <header class="topbar">
         <span class="workspace-heading">Your personal workspace</span>
         <div class="topbar-actions">
-          <span class="local-badge"><component v-if="!online" :is="WifiOff" :size="15" /><span v-else class="small-dot"></span>{{ !online ? 'Offline' : session?.mode === 'access' ? 'Private workspace' : 'On this computer' }}</span>
+          <span class="local-badge"><component v-if="!online" :is="WifiOff" :size="15" /><span v-else class="small-dot"></span>{{ !online ? 'Offline' : session?.mode === 'clerk' ? 'Private workspace' : 'On this computer' }}</span>
           <button v-if="canInstall" class="icon-button" type="button" aria-label="Install PlanWatch" title="Install PlanWatch" @click="install"><Download :size="19" /></button>
-          <a v-if="session?.mode === 'access'" class="icon-button sign-out" href="/cdn-cgi/access/logout" aria-label="Sign out" title="Sign out" @click="clearPrivateView"><LogOut :size="18" /></a>
+          <button v-if="accountId" class="icon-button sign-out" type="button" :disabled="busy" aria-label="Sign out" title="Sign out" @click="clearPrivateView(); emit('signOut')"><LogOut :size="18" /></button>
           <button class="theme-toggle" type="button" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme">
             <component :is="isDark ? Sun : Moon" :key="isDark ? 'sun' : 'moon'" :size="20" aria-hidden="true" />
           </button>
@@ -243,17 +260,18 @@ onUnmounted(() => {
         </div>
 
         <div v-if="!online" class="connection-banner" role="status"><WifiOff :size="18" /><span>You’re offline. You can keep writing drafts; reconnect to load or save tasks.</span></div>
-        <div v-if="authState === 'signin'" class="connection-banner" role="alert"><span>{{ error || 'Sign in again to continue. Your drafts are kept on this device.' }}</span><a class="secondary" href="/">Sign in again</a></div>
+        <div v-if="authState === 'signin'" class="connection-banner" role="alert"><span>{{ error || 'Sign in again to continue. Your drafts are kept on this device.' }}</span><button v-if="accountId" class="secondary" @click="emit('signIn')">Switch account</button><a v-else class="secondary" href="/">Sign in again</a></div>
+        <p v-if="accountId && (setupRequired || authState === 'signin')" class="capture-hint account-reference">Account reference: <code>{{ accountId }}</code></p>
         <div v-if="installHelp" class="connection-banner" role="status"><span>{{ installHelp }}</span><button class="icon-button" aria-label="Dismiss installation instructions" @click="installHelp = ''"><X :size="17" /></button></div>
         <div v-if="appUpdate" class="connection-banner" role="status"><span>An app update is ready. Save your changes before reloading.</span><button class="secondary" :disabled="busy" @click="applyUpdate">Reload app</button></div>
         <p v-if="registrationError" class="capture-hint">The offline screen could not be prepared. You can keep using PlanWatch online.</p>
 
         <template v-if="view !== 'trash' && authState === 'ready'">
           <form class="capture" @submit.prevent="add">
-            <div class="capture-main"><Plus :size="22" aria-hidden="true" /><input ref="titleInput" v-model="capture.title" aria-label="New task title" placeholder="What would you like to do?" maxlength="200" required :disabled="busy" /><button class="primary" :disabled="!canWrite || !capture.title.trim() || busy || loading" type="submit"><Plus :size="17" /><span>Add task</span></button></div>
+            <div class="capture-main"><Plus :size="22" aria-hidden="true" /><input ref="titleInput" v-model="capture.title" aria-label="New task title" placeholder="What would you like to do?" maxlength="200" required aria-describedby="capture-help" :disabled="busy" /><button class="primary" :disabled="!canWrite || !capture.title.trim() || busy" type="submit"><Plus :size="17" /><span>Add task</span></button></div>
             <fieldset class="capture-schedule" :disabled="busy"><label class="capture-date"><CalendarDays :size="15" /><span class="sr-only">Planned day for new task, optional</span><input v-model="capture.plannedDate" type="date" min="0001-01-01" max="9999-12-31" /></label><button class="date-chip" type="button" @click="capture.plannedDate = today">Today</button><button class="date-chip" type="button" @click="capture.plannedDate = nextDay(today)">Tomorrow</button><button class="date-chip" type="button" @click="capture.plannedDate = ''">No date</button></fieldset>
           </form>
-          <p class="capture-hint">A title is enough. Dates and details are optional.{{ !storageAvailable ? ' Drafts will last only while this page stays open.' : '' }}</p>
+          <p id="capture-help" class="capture-hint">Write a title, then tap Add task. Dates and details are optional.{{ !storageAvailable ? ' Drafts will last only while this page stays open.' : '' }}</p>
         </template>
 
         <div v-if="error && authState !== 'signin'" role="alert" class="error-message">{{ error }} <button :disabled="busy || loading || !online" @click="reload">Refresh tasks</button></div>
@@ -284,7 +302,7 @@ onUnmounted(() => {
           </article>
         </section>
         <div class="list-bottom"><span v-if="tasks.length">{{ tasks.length }} {{ tasks.length === 1 ? 'task' : 'tasks' }}{{ cursor ? ' loaded · more available' : '' }}</span><button v-if="cursor" class="secondary" :disabled="busy || loading" @click="run(() => load(true))">{{ loading ? 'Loading…' : 'Load more' }}</button></div>
-        <footer><span class="small-dot"></span>{{ session?.mode === 'access' ? 'Saved privately in your workspace.' : 'Local development workspace.' }}<span v-if="lastSynced">Last refreshed {{ new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit' }).format(lastSynced) }} · {{ TIME_ZONE }}</span></footer>
+        <footer><span class="small-dot"></span>{{ session?.mode === 'clerk' ? 'Saved privately in your workspace.' : accountId ? 'Your private workspace.' : 'Local development workspace.' }}<span v-if="lastSynced">Last refreshed {{ new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit' }).format(lastSynced) }} · {{ TIME_ZONE }}</span></footer>
       </div>
     </main>
   </div>

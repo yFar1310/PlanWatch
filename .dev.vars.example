@@ -1,7 +1,7 @@
 # Used by the local prototype only. Production APIs stay locked until real authentication is added.
 LOCAL_DEV=true
 
-# Hosted configuration (team hostname only, without https://). Keep LOCAL_DEV=false when hosted.
-# ACCESS_TEAM_DOMAIN=your-team.cloudflareaccess.com
-# ACCESS_AUD=your-application-audience
-# OWNER_EMAIL=your-personal-email@example.com
+# To verify Clerk locally instead of using the local-only bypass, set LOCAL_DEV=false.
+# CLERK_ISSUER_URL=https://your-instance.clerk.accounts.dev
+# CLERK_OWNER_USER_ID=user_YOUR_ID
+# APP_ORIGIN=http://127.0.0.1:5174

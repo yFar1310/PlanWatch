@@ -218,10 +218,29 @@ button svg {
   font-size:11px;
 }
 
-main {
+.app-shell > main {
   margin-left:244px;
   width:calc(100% - 244px);
 }
+
+.auth-page {
+  min-height:100svh;
+  width:100%;
+  margin:0;
+  display:grid;
+  place-items:center;
+  padding:calc(70px + env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+}
+.auth-theme { position:fixed; top:calc(20px + env(safe-area-inset-top)); right:calc(20px + env(safe-area-inset-right)); }
+.auth-card { width:min(100%, 440px); text-align:center; }
+.auth-card h1 { font-size:clamp(27px, 6vw, 36px); }
+.auth-card > p { color:var(--muted); line-height:1.7; }
+.auth-brand { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:38px; font-size:22px; font-weight:700; }
+.auth-loading { display:flex; justify-content:center; align-items:center; gap:10px; margin:32px 0 20px; color:var(--muted); }
+.auth-card .cl-rootBox { width:100%; margin:28px auto 0; }
+.auth-card .cl-cardBox { width:100%; max-width:100%; }
+.auth-note { margin-top:24px; font-size:12px; }
+.account-reference { overflow-wrap:anywhere; }
 
 .topbar {
   height:79px;
@@ -719,7 +738,7 @@ footer .small-dot {
     width:205px;
     padding:30px 18px;
   }
-  main {
+  .app-shell > main {
     margin-left:205px;
     width:calc(100% - 205px);
   }
@@ -762,7 +781,7 @@ footer .small-dot {
   .preview-label span {
     font-size:9px;
   }
-  main {
+  .app-shell > main {
     margin:0;
     width:100%;
   }

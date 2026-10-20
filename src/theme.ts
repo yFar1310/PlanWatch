@@ -3,12 +3,12 @@ import { onMounted, onUnmounted, ref, watch } from 'vue';
 type Theme = 'system' | 'light' | 'dark';
 const key = 'planwatch:theme';
 function valid(value: unknown): Theme { return value === 'light' || value === 'dark' ? value : 'system'; }
+let initial: Theme = 'system';
+try { initial = valid(localStorage.getItem(key)); } catch { /* System theme works without storage. */ }
+const preference = ref(initial);
+const isDark = ref(false);
 
 export function useTheme() {
-  let initial: Theme = 'system';
-  try { initial = valid(localStorage.getItem(key)); } catch { /* System theme works without storage. */ }
-  const preference = ref(initial);
-  const isDark = ref(false);
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   const apply = () => {
     const dark = preference.value === 'dark' || (preference.value === 'system' && media.matches);

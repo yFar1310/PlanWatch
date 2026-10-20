@@ -1,12 +1,12 @@
 import { createRemoteJWKSet, errors, jwtVerify } from 'jose';
-import { z } from 'zod';
 import type { SessionInfo } from '../shared/session';
 
 export interface AuthBindings {
   LOCAL_DEV?: string;
-  ACCESS_TEAM_DOMAIN?: string;
-  ACCESS_AUD?: string;
-  OWNER_EMAIL?: string;
+  CLERK_ISSUER_URL?: string;
+  CLERK_OWNER_USER_ID?: string;
+  APP_ORIGIN?: string;
+  API_ORIGIN?: string;
 }
 export interface Session extends SessionInfo { ownerId: string }
 export class AuthError extends Error {
@@ -14,35 +14,56 @@ export class AuthError extends Error {
 }
 const keySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
+function configuration(env: AuthBindings) {
+  try {
+    const issuer = new URL(env.CLERK_ISSUER_URL ?? '');
+    const origin = new URL(env.APP_ORIGIN ?? '');
+    const apiOrigin = new URL(env.API_ORIGIN ?? env.APP_ORIGIN ?? '');
+    const owner = env.CLERK_OWNER_USER_ID?.trim();
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname);
+    if (issuer.protocol !== 'https:' || issuer.port || issuer.username || issuer.password || issuer.href !== `${issuer.origin}/`
+      || !/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(issuer.hostname)
+      || origin.username || origin.password || origin.href !== `${origin.origin}/`
+      || (origin.protocol !== 'https:' && !(loopback && origin.protocol === 'http:'))
+      || apiOrigin.username || apiOrigin.password || apiOrigin.href !== `${apiOrigin.origin}/`
+      || (apiOrigin.protocol !== 'https:' && !(['localhost', '127.0.0.1', '[::1]'].includes(apiOrigin.hostname) && apiOrigin.protocol === 'http:'))
+      || !owner || !/^user_[a-zA-Z0-9]+$/.test(owner)) throw new Error('Invalid configuration');
+    return { issuer: issuer.origin, origin: origin.origin, apiOrigin: apiOrigin.origin, owner };
+  } catch {
+    throw new AuthError('setup_required', 'Private sign-in is being configured. Your saved tasks remain protected.', 503);
+  }
+}
+
 export async function authenticate(request: Request, env: AuthBindings): Promise<Session> {
   const hostname = new URL(request.url).hostname;
   if (env.LOCAL_DEV === 'true' && ['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
     return { ownerId: 'local-preview', mode: 'local', email: null, expiresAt: null };
   }
-  const team = env.ACCESS_TEAM_DOMAIN?.trim().toLowerCase();
-  const audience = env.ACCESS_AUD?.trim();
-  const owner = env.OWNER_EMAIL?.trim().toLowerCase();
-  if (!team || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.cloudflareaccess\.com$/.test(team) || !audience || !z.email().safeParse(owner).success) {
-    throw new AuthError('setup_required', 'Private access has not been configured for this app.', 503);
-  }
-  const token = request.headers.get('Cf-Access-Jwt-Assertion');
+  const config = configuration(env);
+  if (new URL(request.url).origin !== config.apiOrigin) throw new AuthError('invalid_origin', 'Open your private PlanWatch address to continue.', 403);
+  // Accept only an explicit session bearer, never an identity header or ambient cookie.
+  const authorization = request.headers.get('Authorization');
+  const token = authorization?.match(/^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/i)?.[1];
   if (!token || token.length > 16_384) throw new AuthError('sign_in_required', 'Sign in to load and save your tasks. Your drafts are kept on this device.', 401);
-  let keySet = keySets.get(team);
+  let keySet = keySets.get(config.issuer);
   if (!keySet) {
-    keySet = createRemoteJWKSet(new URL(`https://${team}/cdn-cgi/access/certs`), { timeoutDuration: 5_000 });
-    keySets.set(team, keySet);
+    keySet = createRemoteJWKSet(new URL(`${config.issuer}/.well-known/jwks.json`), { timeoutDuration: 5_000 });
+    keySets.set(config.issuer, keySet);
   }
   try {
     const { payload } = await jwtVerify(token, keySet, {
-      issuer: `https://${team}`, audience, algorithms: ['RS256'],
-      requiredClaims: ['exp', 'iat', 'sub', 'email'], clockTolerance: 5,
+      issuer: config.issuer, algorithms: ['RS256'],
+      requiredClaims: ['exp', 'iat', 'nbf', 'sub', 'sid', 'azp', 'v'], clockTolerance: 5,
     });
-    if (typeof payload.email !== 'string' || typeof payload.sub !== 'string' || !payload.sub || payload.iat! > Date.now() / 1000 + 5) {
+    if (payload.v !== 2 || typeof payload.sub !== 'string' || !/^user_[a-zA-Z0-9]+$/.test(payload.sub)
+      || typeof payload.sid !== 'string' || !/^sess_[a-zA-Z0-9]+$/.test(payload.sid)
+      || payload.azp !== config.origin || payload.iat! > Date.now() / 1000 + 5
+      || payload.act !== undefined || (payload.sts !== undefined && payload.sts !== 'active')) {
       throw new AuthError('invalid_session', 'This session could not be verified. Sign in again.', 401);
     }
-    if (payload.email.trim().toLowerCase() !== owner) throw new AuthError('not_allowed', 'This account does not have access to this workspace.', 403);
+    if (payload.sub !== config.owner) throw new AuthError('not_allowed', 'This account does not have access to this workspace. Use your personal account.', 403);
     // A stable single-person workspace; changing login providers does not change the data owner.
-    return { ownerId: 'personal', mode: 'access', email: owner!, expiresAt: payload.exp! * 1000 };
+    return { ownerId: 'personal', mode: 'clerk', email: null, expiresAt: payload.exp! * 1000 };
   } catch (error) {
     if (error instanceof AuthError) throw error;
     if (error instanceof errors.JOSEError && !['ERR_JWKS_TIMEOUT', 'ERR_JWKS_INVALID', 'ERR_JOSE_GENERIC'].includes(error.code)) {

@@ -6,14 +6,38 @@ import { authenticate, AuthError, type AuthBindings, type Session } from './auth
 export interface Bindings extends AuthBindings { DB: D1Database }
 const app = new Hono<{ Bindings: Bindings; Variables: { session: Session } }>();
 
-// Local bypass is loopback-only. Hosted requests require verified Access tokens and the allowed owner.
+// The Pages frontend talks directly to the Worker. Preflight never reads D1 or requires a token.
+app.use('/api/*', async (c, next) => {
+  c.header('Cache-Control', 'private, no-store');
+  c.header('Vary', 'Origin');
+  const url = new URL(c.req.url);
+  const local = c.env.LOCAL_DEV === 'true' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  const allowedOrigin = local ? url.origin : c.env.APP_ORIGIN?.trim().replace(/\/$/, '');
+  const origin = c.req.header('Origin');
+  if (origin && origin !== allowedOrigin) return c.json({ error: 'invalid_origin', message: 'Open your private PlanWatch address to continue.' }, 403);
+  if (origin && origin === allowedOrigin) c.header('Access-Control-Allow-Origin', origin);
+  if (c.req.method === 'OPTIONS') {
+    const method = c.req.header('Access-Control-Request-Method');
+    const headers = c.req.header('Access-Control-Request-Headers')?.split(',').map(value => value.trim().toLowerCase()) ?? [];
+    if (!origin || !method || !['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'].includes(method) || headers.some(value => !['authorization', 'content-type', 'idempotency-key'].includes(value))) {
+      return c.json({ error: 'invalid_preflight', message: 'This browser request is not allowed.' }, 403);
+    }
+    c.header('Access-Control-Allow-Methods', 'GET, HEAD, POST, PATCH, DELETE');
+    c.header('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key');
+    c.header('Access-Control-Max-Age', '600');
+    return c.body(null, 204);
+  }
+  await next();
+});
+
+// Local bypass is loopback-only. Hosted requests require a verified Clerk session for the pinned owner.
 app.use('/api/*', async (c, next) => {
   c.header('Cache-Control', 'private, no-store');
   const session = await authenticate(c.req.raw, c.env);
   c.set('session', session);
   if (!['GET', 'HEAD'].includes(c.req.method)) {
     const origin = c.req.header('Origin');
-    if ((session.mode === 'access' && !origin) || (origin && origin !== new URL(c.req.url).origin)) return c.json({ error: 'invalid_origin', message: 'Use the app to make this change.' }, 403);
+    if (session.mode !== 'local' && !origin) return c.json({ error: 'invalid_origin', message: 'Use the app to make this change.' }, 403);
     if (!c.req.header('Content-Type')?.includes('application/json')) throw new Problem('invalid_content_type', 'Send task changes as JSON.', 415);
   }
   await next();

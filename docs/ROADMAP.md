@@ -18,11 +18,11 @@ Current status: Today, optional planned days, rescheduling, database search/filt
 
 ## 3. Deliver phone access
 
-Add secure personal authentication, Cloudflare preview deployment, one-origin API/static delivery, PWA installation, safe-area layouts, and connection feedback. Measure actual resource usage. Add backups and test restoration before migrating any existing personal data.
+Add secure personal authentication, separate Cloudflare Pages/Worker preview deployment, restricted cross-origin API delivery, PWA installation, safe-area layouts, and connection feedback. Measure actual resource usage. Add backups and test restoration before migrating any existing personal data.
 
 Done: the app works on the user's real phone while the development laptop is off, with tested sessions, persistence, recovery, and rollback.
 
-Current status: installation assets, safe areas, connection/session feedback, signed Cloudflare Access verification, and local backup/restore tooling are implemented. Forty Workers tests and thirteen client/asset checks pass, and an actual local restore was verified. Cloudflare CLI access is connected; Access configuration, real-device browser checks, hosted recovery/rollback, and measured usage remain acceptance gates. See [phone access](PHONE-ACCESS.md).
+Current status: installation assets, safe areas, session/connection handling, Clerk authentication pinned to the owner, restricted Pages-to-Worker calls, and local backup/restore tooling are implemented. Forty-five Workers tests, twelve Vue component tests, and twenty-one client/asset/deployment checks pass. The dedicated Pages frontend and separate Worker API are deployed with D1. The owner confirmed phone access over cellular data; the school Wi-Fi blocks the Cloudflare preview domains. A saved task round trip and the remaining phone checks are pending. A GitHub Actions workflow is prepared; its repository configuration and scoped Cloudflare secret still need to be set. Clerk development keys support preview testing; an owned domain and production Clerk setup, real-device checks, hosted recovery/rollback, and measured usage remain acceptance gates. See [phone access](PHONE-ACCESS.md).
 
 ## 4. Add goals, tracking, and the map
 
